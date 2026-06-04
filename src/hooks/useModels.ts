@@ -35,6 +35,14 @@ export interface UseModelsReturn {
   mergedByProvider: Record<ProviderId, string[]>;
 }
 
+/**
+ * 前端可调用 `fetchProvider` 的 provider 列表 — 与 Rust `LISTABLE_PROVIDERS` 对齐。
+ * minimaxi 走 Anthropic 兼容协议,没有 /v1/models 端点,前端走 hardcoded 白名单,
+ * 自动跳过动态拉取(避免 401 错误条)。
+ * v1.3:minimaxi 从这里移出。
+ */
+export const LISTABLE_PROVIDERS_FRONTEND: readonly ProviderId[] = ['deepseek', 'openai'];
+
 export function useModels(): UseModelsReturn {
   const byProvider = useModelsStore((s) => s.byProvider);
   const setIds = useModelsStore((s) => s.setIds);

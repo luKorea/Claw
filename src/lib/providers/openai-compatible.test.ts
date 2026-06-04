@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import { deepseekAdapter } from '@/lib/providers/deepseek';
-import { minimaxiAdapter } from '@/lib/providers/minimaxi';
 import { openaiAdapter } from '@/lib/providers/openai';
 import { OpenAICompatAdapter, parseSSEEvent, type ToolAccEntry } from '@/lib/providers/openai-compatible';
 
@@ -294,10 +293,7 @@ describe('providers/openai-compatible', () => {
       expect(openaiAdapter.id).toBe('openai');
       expect(openaiAdapter.baseUrl).toBe('https://api.openai.com/v1');
     });
-    it('minimaxiAdapter 配置正确', () => {
-      expect(minimaxiAdapter.id).toBe('minimaxi');
-      // v1.3:MiniMax 官方主域从 minimaxi.com 切到 minimax.io(401 修正)
-      expect(minimaxiAdapter.baseUrl).toBe('https://api.minimax.io/v1');
-    });
+    // minimaxi 不在 OAI compat 子类里 — 它走 Anthropic 兼容协议,
+    // 测试见 minimaxi.test.ts。
   });
 });

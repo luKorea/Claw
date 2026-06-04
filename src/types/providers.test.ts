@@ -22,13 +22,8 @@ describe('types/providers', () => {
         const meta = PROVIDERS[id];
         expect(meta.id).toBe(id);
         expect(meta.label.length).toBeGreaterThan(0);
-        // v1.3:MiniMax 用 JWT 格式 (eyJ...),不再是 sk- 前缀。
-        // 其他三家 (anthropic / openai / deepseek) 仍是 sk- 前缀。
-        if (id === 'minimaxi') {
-          expect(meta.keyPlaceholder.startsWith('eyJ')).toBe(true);
-        } else {
-          expect(meta.keyPlaceholder.startsWith('sk-')).toBe(true);
-        }
+        // v1.3 修正:minimaxi 走 Anthropic 兼容协议,key 是 sk-cp-...,与其它三家都 sk- 开头。
+        expect(meta.keyPlaceholder.startsWith('sk-')).toBe(true);
         expect(meta.keyHelpUrl.startsWith('https://')).toBe(true);
         expect(meta.keyHelpLabel.length).toBeGreaterThan(0);
       }

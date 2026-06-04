@@ -8,7 +8,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSettings } from '@/hooks/useSettings';
 import { useConversations } from '@/hooks/useConversations';
-import { useModels } from '@/hooks/useModels';
+import { LISTABLE_PROVIDERS_FRONTEND, useModels } from '@/hooks/useModels';
 import { applyTheme, useSettingsStore } from '@/stores/settings';
 import { getProviderOfModel } from '@/types/providers';
 
@@ -39,11 +39,14 @@ export default function App() {
   // useModels.fetchProvider 内部有 24h TTL 缓存,只在首次或 stale 时真发请求,
   // 不会重复打 provider 的 /v1/models。
   // 之前只在 ApiKeyTab 保存 key 时才拉 → 启动后主页面顶部模型下拉永远为空。
+  // **跳过 minimaxi**:走 Anthropic 兼容协议,没有 /v1/models,拉也是 401。
+  // 它的模型列表走 MINIMAXI_MODELS 硬编码。
   const fetchedRef = useRef(false);
   useEffect(() => {
     if (fetchedRef.current) return;
     if (configuredProviders.size === 0) return;
     for (const p of configuredProviders) {
+      if (!LISTABLE_PROVIDERS_FRONTEND.includes(p)) continue;
       void fetchProvider(p);
     }
     fetchedRef.current = true;

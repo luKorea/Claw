@@ -52,8 +52,9 @@ export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
   minimaxi: {
     id: 'minimaxi',
     label: 'MiniMax',
-    // v1.3 修正:MiniMax key 实际是 JWT 格式,不是 sk-cp-
-    keyPlaceholder: 'eyJ...',
+    // v1.3 修正:之前误以为 MiniMax 走 OpenAI 兼容,key 是 eyJ... JWT。
+    // 实测 MiniMax 提供 Anthropic 兼容 endpoint,key 格式是 sk-cp-...(Anthropic 风格)。
+    keyPlaceholder: 'sk-cp-...',
     keyHelpUrl: 'https://platform.minimaxi.com',
     keyHelpLabel: 'platform.minimaxi.com',
   },

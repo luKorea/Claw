@@ -14,6 +14,7 @@ import type {
 } from '@/lib/providers/types';
 import type { ToolDefinition } from '@/types/tool';
 import type { Usage } from '@/types/claude';
+import type { ProviderId } from '@/types/providers';
 
 /** Anthropic 强制 max_tokens > budget_tokens */
 export function resolveAnthropicMaxTokens(thinking?: { budget_tokens: number } | null): number {
@@ -79,25 +80,56 @@ export function toAnthropicMessages(msgs: AdapterRequest['messages']): Anthropic
   return out;
 }
 
+export interface AnthropicAdapterOptions {
+  /**
+   * 覆盖 SDK baseURL。
+   * - Anthropic 官方:`https://api.anthropic.com`(SDK 默认)
+   * - MiniMax Anthropic 兼容:`https://api.minimaxi.com/anthropic`(端点 `/anthropic/v1/messages`)
+   *
+   * SDK 会自动在 baseURL 后拼 `/v1/messages`,所以要包含 path 前缀。
+   */
+  baseURL?: string;
+  /** 覆盖 validateKey 逻辑(默认:非空 + `sk-` 开头) */
+  validateKey?: (key: string) => { ok: true } | { ok: false; reason: string };
+  /** previewKey 前缀(默认 `sk`) */
+  keyPrefix?: string;
+  /** provider 标识,错误信息用(默认 `Anthropic`) */
+  providerLabel?: string;
+}
+
 export class AnthropicAdapter implements ProviderAdapter {
-  readonly id = 'anthropic' as const;
-  readonly baseUrl = 'https://api.anthropic.com';
+  readonly id: ProviderId;
+  readonly baseUrl: string;
   readonly capabilities = { thinking: true, tools: true, system: true };
+  private readonly opts: AnthropicAdapterOptions;
+
+  constructor(id: ProviderId = 'anthropic', opts: AnthropicAdapterOptions = {}) {
+    this.id = id;
+    this.opts = opts;
+    this.baseUrl = opts.baseURL ?? 'https://api.anthropic.com';
+  }
 
   validateKey(key: string): { ok: true } | { ok: false; reason: string } {
+    if (this.opts.validateKey) return this.opts.validateKey(key);
     if (!key) return { ok: false, reason: 'API Key 不能为空' };
     if (!key.startsWith('sk-')) return { ok: false, reason: 'API Key 必须以 sk- 开头' };
     return { ok: true };
   }
 
   previewKey(key: string): string {
-    if (key.length < 4) return 'sk-…';
-    return `sk-…${key.slice(-4)}`;
+    // 默认前缀 `sk-`(Anthropic 风格),子类可覆盖。
+    const prefix = this.opts.keyPrefix ?? 'sk-';
+    if (key.length < 4) return `${prefix}…`;
+    return `${prefix}…${key.slice(-4)}`;
   }
 
   stream(req: AdapterRequest, apiKey: string, signal: AbortSignal): AsyncIterable<AdapterEvent> {
-    if (!apiKey) throw new Error('缺少 Anthropic API Key');
-    const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+    if (!apiKey) throw new Error(`缺少 ${this.opts.providerLabel ?? 'Anthropic'} API Key`);
+    const client = new Anthropic({
+      apiKey,
+      baseURL: this.opts.baseURL,
+      dangerouslyAllowBrowser: true,
+    });
 
     const params: Anthropic.MessageStreamParams = {
       model: req.model,
