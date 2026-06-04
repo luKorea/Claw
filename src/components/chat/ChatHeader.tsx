@@ -2,10 +2,9 @@ import { useEffect, useState } from 'react';
 import { BrainIcon } from 'lucide-react';
 
 import { useConversations } from '@/hooks/useConversations';
-import { useSettings } from '@/hooks/useSettings';
-import { useModels } from '@/hooks/useModels';
+import { useGroupedModels } from '@/hooks/useGroupedModels';
 import { useSettingsStore } from '@/stores/settings';
-import { ALL_MODELS, getModelInfo, type ProviderId } from '@/types/providers';
+import { getModelInfo } from '@/types/providers';
 import { cn } from '@/lib/utils';
 
 import {
@@ -24,8 +23,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 
 export function ChatHeader() {
   const conv = useConversations();
-  const { configuredProviders } = useSettings();
-  const { isModelKnown, mergedByProvider } = useModels();
+  const { grouped: groupedModels } = useGroupedModels();
   const defaultModel = useSettingsStore((s) => s.defaultModel);
   const defaultThinkingEnabled = useSettingsStore((s) => s.defaultThinkingEnabled);
   const defaultThinkingBudget = useSettingsStore((s) => s.defaultThinkingBudget);
@@ -52,41 +50,6 @@ export function ChatHeader() {
   };
 
   const supportsThinking = getModelInfo(model)?.supportsThinking ?? false;
-
-  // v1.2 Bug 3.1 + 3.2 + v1.3 重构:已配 Key 的 provider 硬编码 + 动态合并
-  const allGrouped = mergedByProvider;
-  const groupedModels = ALL_MODELS.filter((m) => configuredProviders.has(m.provider)).reduce<
-    Record<string, typeof ALL_MODELS[number][]>
-  >(
-    (acc, m) => {
-      (acc[m.groupLabel] ??= []).push(m);
-      return acc;
-    },
-    {},
-  );
-  for (const [p, ids] of Object.entries(allGrouped) as [ProviderId, string[]][]) {
-    if (!configuredProviders.has(p)) continue;
-    for (const id of ids) {
-      if (isModelKnown(id, p) && !groupedModels[p]) {
-        const sameProvider = ALL_MODELS.find((m) => m.provider === p);
-        const groupKey = sameProvider?.groupLabel ?? p;
-        groupedModels[groupKey] ??= [];
-        if (!groupedModels[groupKey].some((m) => m.id === id)) {
-          const meta = ALL_MODELS.find((m) => m.id === id);
-          groupedModels[groupKey].push(
-            meta ?? {
-              id,
-              provider: p,
-              label: id,
-              family: id,
-              supportsThinking: false,
-              groupLabel: groupKey,
-            },
-          );
-        }
-      }
-    }
-  }
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur">
