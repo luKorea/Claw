@@ -132,7 +132,7 @@ export function ProviderKeyCard({
           >
             {meta.keyHelpLabel}
           </a>{' '}
-          获取。Key 以 <code>sk-</code> 开头。
+          获取。Key 以 <code>{provider === 'minimaxi' ? 'eyJ' : 'sk-'}</code> 开头。
         </span>
         {state.configured && (
           <Button

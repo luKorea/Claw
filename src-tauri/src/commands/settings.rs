@@ -54,8 +54,13 @@ pub struct ApiKeyStatus {
 fn preview_for(provider: &str, secret: &str) -> String {
     let len = secret.len();
     let suffix = if len >= 4 { &secret[len - 4..] } else { "" };
+    // minimaxi 用 JWT (`eyJ...`),其他三家 (anthropic / openai / deepseek) 仍 sk-。
+    // 不同前缀让用户在 UI 一眼看出"这个 key 是不是跟我拿的不一样" — 历史教训:
+    // v1.0~v1.1 阶段 sk- 前缀强制过,导致用户把别家 sk-cp-... 误存到 minimaxi 槽位,
+    // 后续 chat 时 MiniMax 服务端 401,UI 预览还显示 sk-…CV1s 让人以为"已配了"。
     match provider {
-        "anthropic" | "deepseek" | "openai" | "minimaxi" => format!("sk-…{suffix}"),
+        "minimaxi" => format!("eyJ…{suffix}"),
+        "anthropic" | "deepseek" | "openai" => format!("sk-…{suffix}"),
         _ => format!("…{suffix}"),
     }
 }
@@ -185,13 +190,22 @@ mod tests {
     }
 
     #[test]
-    fn preview_for_all_providers_use_sk_prefix() {
-        // v1.1:所有 provider 统一 sk-… 后缀
-        for p in ["anthropic", "deepseek", "openai", "minimaxi"] {
+    fn preview_for_sk_providers_use_sk_prefix() {
+        // v1.1:anthropic / deepseek / openai 仍走 sk-… 后缀
+        for p in ["anthropic", "deepseek", "openai"] {
             let s = preview_for(p, "sk-anything-1234");
             assert!(s.starts_with("sk-"), "{p} 预览应 sk-: {s}");
             assert!(s.ends_with("1234"), "{p} 应保留后 4 位");
         }
+    }
+
+    #[test]
+    fn preview_for_minimaxi_uses_eyj_prefix() {
+        // 401 教训:keychain 残留旧 sk-cp-... 错 key 时,UI 预览还是显示 sk-…CV1s,
+        // 用户看着像"已配了"。改成 eyJ…,残留错 key 的预览会明显跟真 JWT 预览不一致。
+        let s = preview_for("minimaxi", "eyJhbGciOi...abcd");
+        assert!(s.starts_with("eyJ"), "minimaxi 预览应 eyJ-,实际: {s}");
+        assert!(s.ends_with("abcd"), "应保留后 4 位");
     }
 
     #[test]
