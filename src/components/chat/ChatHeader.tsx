@@ -25,7 +25,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 export function ChatHeader() {
   const conv = useConversations();
   const { configuredProviders } = useSettings();
-  const { isModelKnown, mergedModelsByProvider } = useModels();
+  const { isModelKnown, mergedByProvider } = useModels();
   const defaultModel = useSettingsStore((s) => s.defaultModel);
   const defaultThinkingEnabled = useSettingsStore((s) => s.defaultThinkingEnabled);
   const defaultThinkingBudget = useSettingsStore((s) => s.defaultThinkingBudget);
@@ -53,8 +53,8 @@ export function ChatHeader() {
 
   const supportsThinking = getModelInfo(model)?.supportsThinking ?? false;
 
-  // v1.2 Bug 3.1 + 3.2:已配 Key 的 provider 硬编码 + 动态合并
-  const allGrouped = mergedModelsByProvider();
+  // v1.2 Bug 3.1 + 3.2 + v1.3 重构:已配 Key 的 provider 硬编码 + 动态合并
+  const allGrouped = mergedByProvider;
   const groupedModels = ALL_MODELS.filter((m) => configuredProviders.has(m.provider)).reduce<
     Record<string, typeof ALL_MODELS[number][]>
   >(
@@ -64,9 +64,9 @@ export function ChatHeader() {
     },
     {},
   );
-  for (const p of Object.keys(allGrouped) as ProviderId[]) {
+  for (const [p, ids] of Object.entries(allGrouped) as [ProviderId, string[]][]) {
     if (!configuredProviders.has(p)) continue;
-    for (const id of allGrouped[p]) {
+    for (const id of ids) {
       if (isModelKnown(id, p) && !groupedModels[p]) {
         const sameProvider = ALL_MODELS.find((m) => m.provider === p);
         const groupKey = sameProvider?.groupLabel ?? p;

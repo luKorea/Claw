@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { useConversationsStore } from '@/stores/conversations';
 import { useChatStore } from '@/stores/chat';
 import { useSettingsStore } from '@/stores/settings';
-import { now, uuid } from '@/lib/utils';
 
 import { conversationApi, messageApi } from '@/lib/db';
 
@@ -26,34 +25,14 @@ function restoreMessage(m: Message): ChatMessage {
   };
 }
 
-function dumpMessage(m: ChatMessage): {
-  content: string;
-  thinking: string | null;
-  tool_calls: string | null;
-  tool_results: string | null;
-  model: string | null;
-} {
-  const thinking = m.content
-    .filter((b): b is Extract<ContentBlock, { type: 'thinking' }> => b.type === 'thinking')
-    .map((b) => b.thinking)
-    .join('\n\n');
-  const toolCalls = m.content.filter(
-    (b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use',
-  );
-  const toolResults = m.content.filter(
-    (b): b is Extract<ContentBlock, { type: 'tool_result' }> => b.type === 'tool_result',
-  );
-  return {
-    content: JSON.stringify(m.content),
-    thinking: thinking || null,
-    tool_calls: toolCalls.length ? JSON.stringify(toolCalls) : null,
-    tool_results: toolResults.length ? JSON.stringify(toolResults) : null,
-    model: m.model ?? null,
-  };
-}
-
 /**
- * 会话操作 hook
+ * 会话操作 hook(v1.3 重构)
+ *
+ * 设计要点:
+ * - 跨 store 全部 selector 化,避免整订阅导致流式时整 hook 重渲
+ * - 删除 `createUserMessage` / `createAssistantPlaceholder` / `finalizeAssistantMessage`
+ *   三个死函数(useChat 有同名但不同实现的私有函数,grep 全仓 0 调用)
+ * - 暴露扁平 API,不再包裹"store-like"对象,调用方按需取字段
  */
 export function useConversations() {
   // 用 selector 拿稳定的 action 引用,避免每次 store 更新导致 useEffect 死循环刷 SQL
@@ -65,7 +44,11 @@ export function useConversations() {
   const upsertStore = useConversationsStore((s) => s.upsert);
   const removeStore = useConversationsStore((s) => s.remove);
   const setCurrentStore = useConversationsStore((s) => s.setCurrent);
-  const chatStore = useChatStore();
+
+  // v1.3:跨 store 拆 selector,避免 useChatStore() 裸订阅
+  const setChatConversation = useChatStore((s) => s.setConversation);
+  const clearChat = useChatStore((s) => s.clear);
+
   const defaultModel = useSettingsStore((s) => s.defaultModel);
 
   const refresh = useCallback(async () => {
@@ -82,39 +65,21 @@ export function useConversations() {
     refresh();
   }, [refresh]);
 
-  // 用稳定引用重组成 caller 期望的"store"对象
-  const store = useMemo(
-    () => ({
-      list,
-      currentId,
-      loading,
-      setList: setListStore,
-      setCurrent: setCurrentStore,
-      upsert: upsertStore,
-      remove: removeStore,
-      setLoading: setLoadingStore,
-    }),
-    [
-      list,
-      currentId,
-      loading,
-      setListStore,
-      setCurrentStore,
-      upsertStore,
-      removeStore,
-      setLoadingStore,
-    ],
+  // 当前会话的派生值(用 useMemo 锁住,避免每次 render 重新 find)
+  const current = useMemo(
+    () => list.find((c) => c.id === currentId) ?? null,
+    [list, currentId],
   );
 
   const selectConversation = useCallback(
     async (id: string) => {
-      const conv = store.list.find((c) => c.id === id);
+      const conv = list.find((c) => c.id === id);
       if (!conv) return;
-      store.setCurrent(id);
+      setCurrentStore(id);
       const messages = await messageApi.list(id);
-      chatStore.setConversation(id, messages.map(restoreMessage));
+      setChatConversation(id, messages.map(restoreMessage));
     },
-    [store, chatStore],
+    [list, setCurrentStore, setChatConversation],
   );
 
   const createNew = useCallback(
@@ -128,130 +93,44 @@ export function useConversations() {
         thinking_enabled: false,
         thinking_budget: null,
       });
-      store.upsert(conv);
-      store.setCurrent(conv.id);
-      chatStore.setConversation(conv.id, []);
+      upsertStore(conv);
+      setCurrentStore(conv.id);
+      setChatConversation(conv.id, []);
       return conv;
     },
-    [store, chatStore, defaultModel],
+    [upsertStore, setCurrentStore, setChatConversation, defaultModel],
   );
 
   const update = useCallback(
     async (input: UpdateConversationInput) => {
       await conversationApi.update(input);
       const updated = await conversationApi.get(input.id);
-      store.upsert(updated);
+      upsertStore(updated);
     },
-    [store],
+    [upsertStore],
   );
 
   const remove = useCallback(
     async (id: string) => {
       await conversationApi.remove(id);
-      store.remove(id);
-      if (store.currentId === id) {
-        chatStore.clear();
+      removeStore(id);
+      if (currentId === id) {
+        clearChat();
       }
     },
-    [store, chatStore],
-  );
-
-  /**
-   * 创建一条 user 消息并落库，返回 ChatMessage 实例
-   */
-  const createUserMessage = useCallback(
-    async (conversationId: string, text: string): Promise<ChatMessage> => {
-      const id = uuid();
-      const msg: ChatMessage = {
-        id,
-        role: 'user',
-        content: [{ type: 'text', text }],
-        createdAt: now(),
-      };
-      const dumped = dumpMessage(msg);
-      await messageApi.save({
-        id,
-        conversation_id: conversationId,
-        role: 'user',
-        content: dumped.content,
-        thinking: dumped.thinking,
-        tool_calls: dumped.tool_calls,
-        tool_results: dumped.tool_results,
-        model: dumped.model,
-        usage: null,
-      });
-      return msg;
-    },
-    [],
-  );
-
-  /**
-   * 创建一条 assistant 占位消息并落库
-   */
-  const createAssistantPlaceholder = useCallback(
-    async (conversationId: string, model: string): Promise<ChatMessage> => {
-      const id = uuid();
-      const msg: ChatMessage = {
-        id,
-        role: 'assistant',
-        content: [],
-        model,
-        streaming: true,
-        createdAt: now(),
-      };
-      const dumped = dumpMessage(msg);
-      await messageApi.save({
-        id,
-        conversation_id: conversationId,
-        role: 'assistant',
-        content: dumped.content,
-        thinking: dumped.thinking,
-        tool_calls: dumped.tool_calls,
-        tool_results: dumped.tool_results,
-        model: dumped.model,
-        usage: null,
-      });
-      return msg;
-    },
-    [],
-  );
-
-  /** 收尾时把 streaming 消息的最终 content 写回 DB */
-  const finalizeAssistantMessage = useCallback(
-    async (msg: ChatMessage, usageJson: string | null = null) => {
-      const dumped = dumpMessage(msg);
-      // 通过 save 复用：先 update conversation.updated_at 已由后端触发，这里需要 update 消息
-      // 简化：删除旧消息后重新插入
-      // 后端没有 update_message，这里采用：删 + 增
-      await messageApi.remove(msg.id).catch(() => {});
-      await messageApi.save({
-        id: msg.id,
-        conversation_id: chatStore.conversationId ?? '',
-        role: 'assistant',
-        content: dumped.content,
-        thinking: dumped.thinking,
-        tool_calls: dumped.tool_calls,
-        tool_results: dumped.tool_results,
-        model: dumped.model,
-        usage: usageJson,
-      });
-    },
-    [chatStore.conversationId],
+    [removeStore, clearChat, currentId],
   );
 
   return {
-    list: store.list,
-    currentId: store.currentId,
-    current: store.list.find((c) => c.id === store.currentId) ?? null,
-    loading: store.loading,
+    list,
+    currentId,
+    current,
+    loading,
     refresh,
     selectConversation,
     createNew,
     update,
     remove,
-    createUserMessage,
-    createAssistantPlaceholder,
-    finalizeAssistantMessage,
   };
 }
 

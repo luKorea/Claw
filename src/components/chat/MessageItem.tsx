@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { BotIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, UserIcon, XCircleIcon } from 'lucide-react';
 
 import type { ChatMessage } from '@/types/claude';
@@ -13,21 +13,34 @@ interface Props {
   message: ChatMessage;
 }
 
-export function MessageItem({ message }: Props) {
+/**
+ * 单条消息渲染组件(v1.3 重构)
+ *
+ * - `React.memo` 包裹,只在新 message 引用变化时重渲
+ * - 4 次 `content.filter` 合并为一次性 partition,避免 O(n) × 4
+ */
+export const MessageItem = memo(function MessageItem({ message }: Props) {
   const isUser = message.role === 'user';
 
-  const textBlocks = message.content.filter(
-    (b): b is Extract<typeof message.content[number], { type: 'text' }> => b.type === 'text',
-  );
-  const thinkingBlocks = message.content.filter(
-    (b): b is Extract<typeof message.content[number], { type: 'thinking' }> => b.type === 'thinking',
-  );
-  const toolUseBlocks = message.content.filter(
-    (b): b is Extract<typeof message.content[number], { type: 'tool_use' }> => b.type === 'tool_use',
-  );
-  const toolResultBlocks = message.content.filter(
-    (b): b is Extract<typeof message.content[number], { type: 'tool_result' }> => b.type === 'tool_result',
-  );
+  // 一次性 partition content blocks,避免 4 次线性扫
+  const { textBlocks, thinkingBlocks, toolUseBlocks, toolResultBlocks } = useMemo(() => {
+    const content = message.content;
+    return {
+      textBlocks: content.filter(
+        (b): b is Extract<typeof content[number], { type: 'text' }> => b.type === 'text',
+      ),
+      thinkingBlocks: content.filter(
+        (b): b is Extract<typeof content[number], { type: 'thinking' }> => b.type === 'thinking',
+      ),
+      toolUseBlocks: content.filter(
+        (b): b is Extract<typeof content[number], { type: 'tool_use' }> => b.type === 'tool_use',
+      ),
+      toolResultBlocks: content.filter(
+        (b): b is Extract<typeof content[number], { type: 'tool_result' }> =>
+          b.type === 'tool_result',
+      ),
+    };
+  }, [message]);
 
   const fullText = textBlocks.map((b) => b.text).join('');
   const fullThinking = thinkingBlocks.map((b) => b.thinking).join('');
@@ -93,7 +106,7 @@ export function MessageItem({ message }: Props) {
       </div>
     </div>
   );
-}
+});
 
 function ToolUseCard({
   name,

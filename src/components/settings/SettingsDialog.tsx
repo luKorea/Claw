@@ -235,11 +235,11 @@ function DefaultTab() {
   const { settings, configuredProviders } = useSettings();
   const conv = useConversations();
   // v1.2 Bug 3.2:用 useModels 合并(动态拉取 + 硬编码 fallback)
-  const { isModelKnown, mergedModelsByProvider } = useModels();
+  const { isModelKnown, mergedByProvider } = useModels();
 
   // v1.2 Bug 3.1:按 provider 分组前先 filter,只显示已配 Key 的 provider 的模型
   // Bug 3.2:用动态 + 硬编码 union;如果当前 defaultModel 不在合并集合内,仍保留(降级显示)
-  const allGrouped = mergedModelsByProvider();
+  const allGrouped = mergedByProvider;
   const groupedModels = ALL_MODELS.filter((m) => configuredProviders.has(m.provider)).reduce<
     Record<string, typeof ALL_MODELS[number][]>
   >(
@@ -250,9 +250,9 @@ function DefaultTab() {
     {},
   );
   // 把动态 id 也并入(可能不在 ALL_MODELS 里,只来自 /v1/models)
-  for (const p of Object.keys(allGrouped) as ProviderId[]) {
+  for (const [p, ids] of Object.entries(allGrouped) as [ProviderId, string[]][]) {
     if (!configuredProviders.has(p)) continue;
-    for (const id of allGrouped[p]) {
+    for (const id of ids) {
       if (isModelKnown(id, p) && !groupedModels[p]) {
         // 合并到对应 group(找硬编码中同 provider 的 group,或建 'Custom' group)
         const sameProvider = ALL_MODELS.find((m) => m.provider === p);

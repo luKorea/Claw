@@ -32,8 +32,18 @@ export interface SendOptions {
 const MAX_TOOL_ROUNDS = 5;
 
 export function useChat() {
-  const chat = useChatStore();
-  // 用 selector 拿稳定引用,避免整个 store 变化触发 useCallback/useEffect 重算
+  // v1.3 重构:逐字段 selector 订阅,避免整 store 订阅导致的整 hook 重渲
+  const setConversation = useChatStore((s) => s.setConversation);
+  const appendMessage = useChatStore((s) => s.appendMessage);
+  const appendContentBlock = useChatStore((s) => s.appendContentBlock);
+  const updateMessage = useChatStore((s) => s.updateMessage);
+  const finalizeMessage = useChatStore((s) => s.finalizeMessage);
+  const setStreaming = useChatStore((s) => s.setStreaming);
+  const setError = useChatStore((s) => s.setError);
+  const isStreaming = useChatStore((s) => s.isStreaming);
+  const error = useChatStore((s) => s.error);
+
+  // 跨 store 的稳定引用(其他 store 已是 selector 模式)
   const conversationsList = useConversationsStore((s) => s.list);
   const upsertConv = useConversationsStore((s) => s.upsert);
   const setCurrentConv = useConversationsStore((s) => s.setCurrent);
@@ -49,8 +59,8 @@ export function useChat() {
     abortRef.current?.abort();
     abortRef.current = null;
     sendingRef.current = false;
-    chat.setStreaming(false);
-  }, [chat]);
+    setStreaming(false);
+  }, [setStreaming]);
 
   const send = useCallback(
     async (opts: SendOptions) => {
@@ -65,7 +75,7 @@ export function useChat() {
       const modelInfo = getModelInfo(model);
       const provider = modelInfo ? modelInfo.provider : getProviderOfModel(model);
       if (!provider) {
-        chat.setError(`未知模型: ${model}`);
+        setError(`未知模型: ${model}`);
         throw new Error(`未知模型: ${model}`);
       }
 
@@ -74,13 +84,15 @@ export function useChat() {
       try {
         apiKey = await getApiKey(provider);
       } catch (err) {
-        chat.setError(err instanceof Error ? err.message : '未配置 API Key');
+        setError(err instanceof Error ? err.message : '未配置 API Key');
         throw err;
       }
 
       // 确保有当前会话
-      let conversationId = chat.conversationId;
-      let conv = conversationsList.find((c) => c.id === conversationId) ?? null;
+      // v1.3 修复:跨 await 用 getState() 拿最新 conversationId,避免闭包陷阱
+      let conversationId = useChatStore.getState().conversationId;
+      let conv =
+        conversationsList.find((c) => c.id === conversationId) ?? null;
       if (!conv) {
         const created = await conversationApi.create({
           title: text.slice(0, 20),
@@ -91,15 +103,21 @@ export function useChat() {
         });
         upsertConv(created);
         setCurrentConv(created.id);
-        chat.setConversation(created.id, []);
+        setConversation(created.id, []);
         conversationId = created.id;
         conv = created;
-      } else if (opts.model || opts.system !== undefined || opts.thinkingEnabled !== undefined) {
+      } else if (
+        opts.model ||
+        opts.system !== undefined ||
+        opts.thinkingEnabled !== undefined
+      ) {
         const patch: Parameters<typeof conversationApi.update>[0] = { id: conv.id };
         if (opts.model) patch.model = opts.model;
         if (opts.system !== undefined) patch.system_prompt = opts.system;
-        if (opts.thinkingEnabled !== undefined) patch.thinking_enabled = opts.thinkingEnabled;
-        if (opts.thinkingBudget !== undefined) patch.thinking_budget = opts.thinkingBudget;
+        if (opts.thinkingEnabled !== undefined)
+          patch.thinking_enabled = opts.thinkingEnabled;
+        if (opts.thinkingBudget !== undefined)
+          patch.thinking_budget = opts.thinkingBudget;
         await conversationApi.update(patch);
         const refreshed = await conversationApi.get(conv.id);
         upsertConv(refreshed);
@@ -107,8 +125,8 @@ export function useChat() {
       }
 
       sendingRef.current = true;
-      chat.setStreaming(true);
-      chat.setError(null);
+      setStreaming(true);
+      setError(null);
 
       // 1. user message
       const userMsg: ChatMessage = {
@@ -117,7 +135,7 @@ export function useChat() {
         content: [{ type: 'text', text }],
         createdAt: now(),
       };
-      chat.appendMessage(userMsg);
+      appendMessage(userMsg);
       const convId = conversationId;
       if (convId) {
         await messageApi
@@ -135,8 +153,10 @@ export function useChat() {
           .catch((e) => console.warn('save user message failed', e));
       }
 
-      const thinkingEnabled = opts.thinkingEnabled ?? Boolean(conv.thinking_enabled);
-      const thinkingBudget = opts.thinkingBudget ?? conv.thinking_budget ?? defaultBudget;
+      const thinkingEnabled =
+        opts.thinkingEnabled ?? Boolean(conv.thinking_enabled);
+      const thinkingBudget =
+        opts.thinkingBudget ?? conv.thinking_budget ?? defaultBudget;
       const system = opts.system ?? conv.system_prompt ?? undefined;
 
       const enabledTools = filterEnabled(disabledTools);
@@ -148,7 +168,7 @@ export function useChat() {
 
       // 当前累积的 assistant 消息
       let currentAssistant: ChatMessage = createAssistantPlaceholder(model);
-      chat.appendMessage(currentAssistant);
+      appendMessage(currentAssistant);
 
       // 工具结果累积(每轮更新)
       const toolResultsBuffer: Array<{
@@ -161,9 +181,13 @@ export function useChat() {
         while (round < MAX_TOOL_ROUNDS) {
           round += 1;
 
-          // 构造 messages
-          const historyMessages = chat.messages
-            .filter((m) => m.id !== currentAssistant.id || toolResultsBuffer.length > 0)
+          // v1.3 修复:跨 await 后必须用 getState() 取最新 messages,
+          // 否则 round≥2 时 historyMessages 漏掉刚 append 的 assistant + tool_result
+          const liveMessages = useChatStore.getState().messages;
+          const historyMessages = liveMessages
+            .filter(
+              (m) => m.id !== currentAssistant.id || toolResultsBuffer.length > 0,
+            )
             .concat(
               toolResultsBuffer.length > 0
                 ? ([
@@ -191,7 +215,13 @@ export function useChat() {
 
           // 过滤空 assistant
           const cleanMessages = messages.filter(
-            (m) => !(m.role === 'assistant' && typeof m.content === 'string' && !m.content && (!m.tool_calls || m.tool_calls.length === 0)),
+            (m) =>
+              !(
+                m.role === 'assistant' &&
+                typeof m.content === 'string' &&
+                !m.content &&
+                (!m.tool_calls || m.tool_calls.length === 0)
+              ),
           );
 
           // thinking 能力由 modelInfo 决定
@@ -223,21 +253,22 @@ export function useChat() {
           await consumeStream(sdkStream, {
             onText: (delta) => {
               if (textIdx === -1) {
-                chat.appendContentBlock(currentAssistant.id, { type: 'text', text: delta });
+                appendContentBlock(currentAssistant.id, { type: 'text', text: delta });
                 textIdx = collected.length;
                 collected.push({ type: 'text', text: delta });
               } else {
                 collected[textIdx] = {
                   type: 'text',
                   text:
-                    (collected[textIdx] as Extract<ContentBlock, { type: 'text' }>).text + delta,
+                    (collected[textIdx] as Extract<ContentBlock, { type: 'text' }>)
+                      .text + delta,
                 };
-                chat.updateMessage(currentAssistant.id, (m) => mergeText(m, delta));
+                updateMessage(currentAssistant.id, (m) => mergeText(m, delta));
               }
             },
             onThinking: (delta) => {
               if (thinkingIdx === -1) {
-                chat.appendContentBlock(currentAssistant.id, {
+                appendContentBlock(currentAssistant.id, {
                   type: 'thinking',
                   thinking: delta,
                 });
@@ -247,10 +278,12 @@ export function useChat() {
                 collected[thinkingIdx] = {
                   type: 'thinking',
                   thinking:
-                    (collected[thinkingIdx] as Extract<ContentBlock, { type: 'thinking' }>)
-                      .thinking + delta,
+                    (collected[thinkingIdx] as Extract<
+                      ContentBlock,
+                      { type: 'thinking' }
+                    >).thinking + delta,
                 };
-                chat.updateMessage(currentAssistant.id, (m) => mergeThinking(m, delta));
+                updateMessage(currentAssistant.id, (m) => mergeThinking(m, delta));
               }
             },
             onToolUse: () => {
@@ -270,11 +303,12 @@ export function useChat() {
 
           // 检查是否有 tool_use
           const toolUses = collected.filter(
-            (b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use',
+            (b): b is Extract<ContentBlock, { type: 'tool_use' }> =>
+              b.type === 'tool_use',
           );
 
           // 完成本轮 assistant 消息
-          chat.finalizeMessage(currentAssistant.id, usage);
+          finalizeMessage(currentAssistant.id, usage);
 
           // 落库当前 assistant
           const finalAssistant: ChatMessage = {
@@ -301,25 +335,25 @@ export function useChat() {
 
           // 创建新一轮 assistant 占位
           currentAssistant = createAssistantPlaceholder(model);
-          chat.appendMessage(currentAssistant);
+          appendMessage(currentAssistant);
         }
       } catch (err) {
         if (controller.signal.aborted) {
-          chat.setError(null);
+          setError(null);
         } else {
           const msg = err instanceof Error ? err.message : String(err);
-          chat.setError(msg);
+          setError(msg);
         }
-        chat.updateMessage(currentAssistant.id, (m) => ({ ...m, streaming: false }));
+        updateMessage(currentAssistant.id, (m) => ({ ...m, streaming: false }));
         sendingRef.current = false;
         abortRef.current = null;
-        chat.setStreaming(false);
+        setStreaming(false);
         return;
       }
 
       sendingRef.current = false;
       abortRef.current = null;
-      chat.setStreaming(false);
+      setStreaming(false);
 
       // 触发 session 列表 updated_at 刷新
       if (conversationId) {
@@ -331,14 +365,29 @@ export function useChat() {
         }
       }
     },
-    [chat, conversationsList, upsertConv, setCurrentConv, defaultModel, defaultThinking, defaultBudget, disabledTools],
+    [
+      setConversation,
+      appendMessage,
+      appendContentBlock,
+      updateMessage,
+      finalizeMessage,
+      setStreaming,
+      setError,
+      conversationsList,
+      upsertConv,
+      setCurrentConv,
+      defaultModel,
+      defaultThinking,
+      defaultBudget,
+      disabledTools,
+    ],
   );
 
   return {
     send,
     cancel,
-    isStreaming: chat.isStreaming,
-    error: chat.error,
+    isStreaming,
+    error,
   };
 }
 

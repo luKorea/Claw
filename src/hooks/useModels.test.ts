@@ -132,18 +132,18 @@ describe('hooks/useModels', () => {
     expect(result.current.isModelKnown('gpt-5', 'anthropic')).toBe(false);
   });
 
-  it('mergedModelsByProvider:动态优先 + 硬编码 fallback + 去重', () => {
+  it('mergedByProvider:动态优先 + 硬编码 fallback + 去重', () => {
     act(() => {
       useModelsStore.getState().setIds('openai', ['gpt-5', 'gpt-new-from-api']);
     });
 
     const { result } = renderHook(() => useModels());
-    const merged = result.current.mergedModelsByProvider();
+    const merged = result.current.mergedByProvider;
     expect(merged.openai).toContain('gpt-5');
     expect(merged.openai).toContain('gpt-new-from-api');
     expect(merged.openai).toContain('gpt-5-mini');
     expect(merged.openai).toContain('gpt-4o');
-    expect(merged.openai.filter((id) => id === 'gpt-5').length).toBe(1);
+    expect(merged.openai.filter((id: string) => id === 'gpt-5').length).toBe(1);
     expect(merged.anthropic).toEqual(
       expect.arrayContaining([
         'claude-opus-4-8',
@@ -151,5 +151,60 @@ describe('hooks/useModels', () => {
         'claude-haiku-4-5-20251001',
       ]),
     );
+  });
+
+  it('retry:清空状态后重新 fetchProvider,真的再调一次 listProviderModels', async () => {
+    // 预置 1h 内拉过的 cache(此时直接 fetchProvider 不会真发请求)
+    act(() => {
+      useModelsStore.setState((s) => ({
+        ...s,
+        byProvider: {
+          ...s.byProvider,
+          openai: {
+            ids: ['gpt-5'],
+            loading: false,
+            error: null,
+            fetchedAt: Date.now() - 60 * 60 * 1000,
+          },
+        },
+      }));
+    });
+
+    mockedGetApiKey.mockResolvedValue('sk-test');
+    mockedListProviderModels.mockResolvedValue(['gpt-5', 'gpt-4o-mini']);
+
+    const { result } = renderHook(() => useModels());
+    await act(async () => {
+      await result.current.retry('openai');
+    });
+
+    // retry 必须真正调 listProviderModels(不命中 24h 缓存)
+    expect(mockedListProviderModels).toHaveBeenCalledTimes(1);
+    expect(result.current.ids('openai')).toEqual(['gpt-5', 'gpt-4o-mini']);
+  });
+
+  it('clearError:只清 error 字段,保留旧 ids 与 fetchedAt', () => {
+    act(() => {
+      useModelsStore.setState((s) => ({
+        ...s,
+        byProvider: {
+          ...s.byProvider,
+          openai: {
+            ids: ['gpt-5'],
+            loading: false,
+            error: 'boom',
+            fetchedAt: 1000,
+          },
+        },
+      }));
+    });
+
+    const { result } = renderHook(() => useModels());
+    act(() => {
+      result.current.clearError('openai');
+    });
+
+    expect(result.current.error('openai')).toBeNull();
+    expect(result.current.ids('openai')).toEqual(['gpt-5']);
   });
 });

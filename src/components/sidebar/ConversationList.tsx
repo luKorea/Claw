@@ -127,7 +127,8 @@ function ConversationItem({
 
 export function ConversationList() {
   const conv = useConversations();
-  const chat = useChatStore();
+  // v1.3:selector 化,只订阅用到的 isStreaming,避免流式时整侧栏 re-render
+  const isStreaming = useChatStore((s) => s.isStreaming);
 
   if (conv.list.length === 0) {
     return (
@@ -150,7 +151,7 @@ export function ConversationList() {
             updatedAt={c.updated_at}
             active={conv.currentId === c.id}
             onSelect={async () => {
-              if (chat.isStreaming) {
+              if (isStreaming) {
                 if (!window.confirm('正在生成回复中，切换会话会中断当前回复。继续？')) return;
               }
               await conv.selectConversation(c.id);
