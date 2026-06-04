@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(lsof -nP -iTCP:1420 -sTCP:LISTEN)",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}  time=%{time_total}s\\\\n\" http://localhost:1420/)",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://127.0.0.1:1420/)",
+      "Bash(pnpm lint *)",
+      "Bash(pnpm add *)",
+      "Bash(cargo check *)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs",
+      "Bash(pnpm test:run src/types/providers.test.ts src/stores/settings.test.ts)",
+      "Bash(pnpm test:run src/stores/settings.test.ts)",
+      "Bash(pnpm test:run src/lib/providers/anthropic.test.ts)",
+      "Bash(pnpm test:run src/lib/providers/openai-compatible.test.ts)",
+      "Bash(pnpm test:run src/lib/providers/messages.test.ts src/lib/streaming.test.ts)"
+    ]
+  }
+}
