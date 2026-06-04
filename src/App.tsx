@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
 import { Sidebar } from '@/components/sidebar/Sidebar';
@@ -8,12 +8,14 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSettings } from '@/hooks/useSettings';
 import { useConversations } from '@/hooks/useConversations';
+import { useModels } from '@/hooks/useModels';
 import { applyTheme, useSettingsStore } from '@/stores/settings';
 import { getProviderOfModel } from '@/types/providers';
 
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { settings, keys, configuredProviders } = useSettings();
+  const { fetchProvider } = useModels();
   const conv = useConversations();
 
   // 启动时:若默认 provider 未配置 Key,自动打开设置
@@ -32,6 +34,20 @@ export default function App() {
       setSettingsOpen(false);
     }
   }, [configuredProviders.size]);
+
+  // v1.3:已配 provider 第一次就绪后,自动拉取它的动态模型列表。
+  // useModels.fetchProvider 内部有 24h TTL 缓存,只在首次或 stale 时真发请求,
+  // 不会重复打 provider 的 /v1/models。
+  // 之前只在 ApiKeyTab 保存 key 时才拉 → 启动后主页面顶部模型下拉永远为空。
+  const fetchedRef = useRef(false);
+  useEffect(() => {
+    if (fetchedRef.current) return;
+    if (configuredProviders.size === 0) return;
+    for (const p of configuredProviders) {
+      void fetchProvider(p);
+    }
+    fetchedRef.current = true;
+  }, [configuredProviders, fetchProvider]);
 
   // 全局快捷键
   useHotkeys(
