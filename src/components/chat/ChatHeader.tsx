@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { BrainIcon } from 'lucide-react';
 
 import { useConversations } from '@/hooks/useConversations';
@@ -38,11 +38,9 @@ export function ChatHeader() {
       : defaultThinkingEnabled;
   const thinkingBudget = current?.thinking_budget ?? defaultThinkingBudget;
 
+  // v1.3:不再用 useEffect 同步外部值,改成"派生 + 派生时同步"。
+  // useState 初始用 thinkingBudget(只在 mount 时读一次);外部变化时由 update 函数透传。
   const [budget, setBudget] = useState(thinkingBudget);
-
-  useEffect(() => {
-    setBudget(thinkingBudget);
-  }, [thinkingBudget]);
 
   const update = async (patch: Parameters<typeof conv.update>[0]) => {
     if (!current) return;

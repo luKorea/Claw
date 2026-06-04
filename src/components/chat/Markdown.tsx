@@ -41,6 +41,10 @@ const components: Components = {
   },
 };
 
+/** v1.3:plugin 数组提到模块作用域,避免每次 render 新建数组触发 react-markdown 重渲 */
+const REMARK_PLUGINS = [remarkGfm, remarkMath];
+const REHYPE_PLUGINS = [rehypeKatex];
+
 /**
  * 统一 Markdown 渲染：GFM + Math + 自定义 code 块
  */
@@ -58,8 +62,8 @@ export function Markdown({ className, children }: Props) {
       )}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         components={components}
       >
         {children}

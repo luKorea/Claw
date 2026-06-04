@@ -9,26 +9,17 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSettings } from '@/hooks/useSettings';
 import { useConversations } from '@/hooks/useConversations';
 import { applyTheme, useSettingsStore } from '@/stores/settings';
+import { getProviderOfModel } from '@/types/providers';
 
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { settings, keys, configuredProviders } = useSettings();
   const conv = useConversations();
 
-  // 应用主题
+  // 启动时:若默认 provider 未配置 Key,自动打开设置
   useEffect(() => {
-    applyTheme(settings.theme);
-  }, [settings.theme]);
-
-  // 启动时：若默认 provider 未配置 Key,自动打开设置
-  useEffect(() => {
-    const defaultProvider = settings.defaultModel
-      ? (settings.defaultModel.startsWith('gpt-')
-          ? 'openai'
-          : settings.defaultModel.startsWith('deepseek-')
-            ? 'deepseek'
-            : 'anthropic')
-      : 'anthropic';
+    // v1.3:用 getProviderOfModel 替代 startsWith 链式推断
+    const defaultProvider = getProviderOfModel(settings.defaultModel) ?? 'anthropic';
     const defaultKey = keys[defaultProvider];
     if (defaultKey && !defaultKey.loading && !defaultKey.configured) {
       setSettingsOpen(true);
@@ -73,6 +64,7 @@ export default function App() {
     [conv],
   );
 
+  // v1.3:删 L19-21 重复的 useEffect 主题同步,只保留 subscribe
   // 同步 store 主题
   useEffect(() => {
     return useSettingsStore.subscribe((s, prev) => {

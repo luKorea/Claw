@@ -1,13 +1,8 @@
 /**
- * usePrompts hook 测试 (v1.2 Bug 4 强约束补)
+ * usePrompts hook 测试 (v1.2 Bug 4 强约束补 + v1.3 renderHook 死循环回归)
  *
- * 注:usePrompts 内部用 `usePromptsStore()` 无 selector,在测试环境 + jsdom + zustand
- * persist 组合下会触发 vitest worker OOM(unknown cause,vitest 2.1 + React 19)。
- * 为避免 OOM,本测试不通过 renderHook 调 hook,而是直接 import store actions
- * 和 promptApi 验证状态机 + lib 工具函数。这样:
- * - 覆盖 store 的 setList/upsert/remove(强约束要求 5 case)
- * - 覆盖 lib/prompts.ts 的 applyPromptVariables(纯函数,强约束要求 3 case)
- * - usePrompts 自身的 useEffect(useEffect 副作用)与 OOM 风险隔离
+ * 大部分 case 走 store + promptApi 集成(避开 v1.2 OOM);
+ * v1.3 selector 化后,新增 1 个真 renderHook 用例验证 mount/unmount 不死循环。
  */
 
 // 整模块 mock 必须在所有 import 之前(vitest hoist)
@@ -25,15 +20,18 @@ vi.mock('@/lib/prompts', async () => {
   };
 });
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
 
 import { usePromptsStore } from '@/stores/prompts';
-import { applyPromptVariables, promptApi } from '@/lib/prompts';
+import { usePrompts } from '@/hooks/usePrompts';
+import { applyPromptVariables, promptApi, seedBuiltinPresets } from '@/lib/prompts';
 
 const mockedList = vi.mocked(promptApi.list);
 const mockedCreate = vi.mocked(promptApi.create);
 const mockedUpdate = vi.mocked(promptApi.update);
 const mockedRemove = vi.mocked(promptApi.remove);
+const mockedSeed = vi.mocked(seedBuiltinPresets);
 
 describe('lib/prompts + stores/prompts (v1.2 Bug 4)', () => {
   beforeEach(() => {
@@ -42,6 +40,11 @@ describe('lib/prompts + stores/prompts (v1.2 Bug 4)', () => {
     mockedCreate.mockReset();
     mockedUpdate.mockReset();
     mockedRemove.mockReset();
+    mockedSeed.mockReset();
+  });
+
+  afterEach(() => {
+    usePromptsStore.setState({ list: [] });
   });
 
   describe('promptApi 集成 + store 同步(usePrompts 等价行为)', () => {
@@ -115,6 +118,51 @@ describe('lib/prompts + stores/prompts (v1.2 Bug 4)', () => {
       expect(
         applyPromptVariables('{{a}} and {{b}}', { a: '1', b: '2' }),
       ).toBe('1 and 2');
+    });
+  });
+
+  describe('usePrompts renderHook 死循环回归 (v1.3)', () => {
+    it('mount → unmount → mount:refresh 与 seed 各只 +1 次,不出现死循环', async () => {
+      mockedSeed.mockResolvedValue(undefined);
+      mockedList.mockResolvedValue([]);
+
+      const { unmount } = renderHook(() => usePrompts());
+      await act(async () => {});
+      expect(mockedSeed).toHaveBeenCalledTimes(1);
+      expect(mockedList).toHaveBeenCalledTimes(1);
+
+      unmount();
+      renderHook(() => usePrompts());
+      await act(async () => {});
+
+      // 第二次 mount 应该各再 +1 次(每次 mount 一次是合理行为)
+      // 死循环的判定:seed / list 调用次数远大于 mount 次数(例如 > 3)
+      expect(mockedSeed).toHaveBeenCalledTimes(2);
+      expect(mockedList).toHaveBeenCalledTimes(2);
+    });
+
+    it('create 调用 promptApi.create 并 store.upsert', async () => {
+      usePromptsStore.setState({ list: [] });
+      mockedSeed.mockResolvedValue(undefined);
+      mockedList.mockResolvedValue([]);
+
+      const { result } = renderHook(() => usePrompts());
+      await act(async () => {});
+
+      mockedCreate.mockResolvedValueOnce({
+        id: 'new',
+        name: 'N',
+        content: 'c',
+        builtin: 0,
+        created_at: 1,
+      });
+
+      await act(async () => {
+        await result.current.create({ name: 'N', content: 'c' });
+      });
+
+      expect(mockedCreate).toHaveBeenCalledTimes(1);
+      expect(usePromptsStore.getState().list.map((p) => p.id)).toEqual(['new']);
     });
   });
 });

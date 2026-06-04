@@ -3,14 +3,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSettingsStore } from '@/stores/settings';
 import {
   ALL_PROVIDER_IDS,
-  PROVIDERS,
   type ProviderId,
 } from '@/types/providers';
 import {
   deleteApiKey,
-  getApiKey as keyringGetKey,
   getApiKeyStatus,
-  listConfiguredProviders,
   setApiKey as keyringSetKey,
 } from '@/lib/keyring';
 // applyTheme 是独立工具函数(非 store 字段),App.tsx 自行 import 使用
@@ -208,14 +205,6 @@ export function useSettings() {
     [refreshOne],
   );
 
-  /** 内部用:发起请求时取明文 key */
-  const getKey = useCallback(
-    async (provider: ProviderId): Promise<string> => {
-      return keyringGetKey(provider);
-    },
-    [],
-  );
-
   /** 同步拿已配置的 provider 集合(用于 UI 提示) */
   // v1.2 Bug 3.1:用 useMemo 锁住 Set 引用,避免每次 render 新建触发子组件 re-render
   const configuredProviders = useMemo(
@@ -231,22 +220,5 @@ export function useSettings() {
     refreshOne,                   // 重新拉单个
     saveKey,                      // (provider, key) => Promise<void>
     removeKey,                    // (provider) => Promise<void>
-    getKey,                       // (provider) => 明文 key (内部用)
-    listConfiguredProviders,      // 调 Rust 命令获取
   };
 }
-
-// 保留旧接口兼容(部分老代码可能还引用 apiKey: ApiKeyState)
-export function useApiKeyLegacy() {
-  const s = useSettings();
-  return {
-    ...s,
-    apiKey: s.keys.anthropic,
-    refreshKeyStatus: () => s.refreshOne('anthropic'),
-    saveKey: (key: string) => s.saveKey('anthropic', key),
-    removeKey: () => s.removeKey('anthropic'),
-  };
-}
-
-// 工具:已知 provider 的列表
-export { PROVIDERS };
