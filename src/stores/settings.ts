@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 import {
   ALL_MODELS,
@@ -36,84 +37,81 @@ function isModelKnown(id: string): boolean {
   return ALL_MODELS.some((m) => m.id === id);
 }
 
-function loadPersisted(): Partial<Persisted> {
-  if (typeof localStorage === 'undefined') return {};
-  try {
-    // 优先 v2
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      return JSON.parse(raw) as Partial<Persisted>;
-    }
-    // 迁移 v1 → v2(若 defaultModel 仍合法,保留)
-    const legacy = localStorage.getItem(LEGACY_KEY);
-    if (legacy) {
-      const parsed = JSON.parse(legacy) as Partial<Persisted>;
-      // 写回 v2
-      if (typeof localStorage !== 'undefined') {
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-        } catch {
-          // ignore
-        }
-      }
-      return parsed;
-    }
-  } catch {
-    // ignore
-  }
-  return {};
+/** v1 → v2 迁移:从旧 key 读出后写回新 key(若 v2 缺,补一次) */
+function migrate(persistedState: unknown, _version: number): Partial<Persisted> {
+  void _version;
+  if (!persistedState || typeof persistedState !== 'object') return {};
+  const s = persistedState as Partial<Persisted>;
+  // 旧的 v1 数据若 defaultModel 仍合法,保留;否则交给 onRehydrateStorage fallback
+  return s;
 }
 
-function savePersisted(s: Persisted): void {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-  } catch {
-    // ignore
-  }
-}
-
-const persisted = loadPersisted();
-
-/** 选取一个合法的 defaultModel(优先持久化,fallback 到 DEFAULT_MODEL_ID) */
+/** 选取一个合法的 defaultModel(persisted 值优先,fallback 到 DEFAULT_MODEL_ID) */
 function resolveDefaultModel(persistedModel: string | undefined): string {
   if (persistedModel && isModelKnown(persistedModel)) return persistedModel;
   return DEFAULT_MODEL_ID;
 }
 
-export const useSettingsStore = create<SettingsState>((set, get) => ({
-  theme: persisted.theme ?? 'dark',
-  defaultModel: resolveDefaultModel(persisted.defaultModel),
-  defaultThinkingEnabled: persisted.defaultThinkingEnabled ?? false,
-  defaultThinkingBudget: persisted.defaultThinkingBudget ?? DEFAULT_THINKING_BUDGET,
+export const useSettingsStore = create<SettingsState>()(
+  persist(
+    (set) => ({
+      theme: 'dark',
+      defaultModel: DEFAULT_MODEL_ID,
+      defaultThinkingEnabled: false,
+      defaultThinkingBudget: DEFAULT_THINKING_BUDGET,
 
-  setTheme: (theme) => {
-    set({ theme });
-    persist(get());
-  },
-  setDefaultModel: (defaultModel) => {
-    if (!isModelKnown(defaultModel)) return;
-    set({ defaultModel });
-    persist(get());
-  },
-  setDefaultThinkingEnabled: (defaultThinkingEnabled) => {
-    set({ defaultThinkingEnabled });
-    persist(get());
-  },
-  setDefaultThinkingBudget: (defaultThinkingBudget) => {
-    set({ defaultThinkingBudget });
-    persist(get());
-  },
-}));
-
-function persist(s: SettingsState): void {
-  savePersisted({
-    theme: s.theme,
-    defaultModel: s.defaultModel,
-    defaultThinkingEnabled: s.defaultThinkingEnabled,
-    defaultThinkingBudget: s.defaultThinkingBudget,
-  });
-}
+      setTheme: (theme) => set({ theme }),
+      setDefaultModel: (defaultModel) => {
+        if (!isModelKnown(defaultModel)) return;
+        set({ defaultModel });
+      },
+      setDefaultThinkingEnabled: (defaultThinkingEnabled) =>
+        set({ defaultThinkingEnabled }),
+      setDefaultThinkingBudget: (defaultThinkingBudget) =>
+        set({ defaultThinkingBudget }),
+    }),
+    {
+      name: STORAGE_KEY,
+      version: 2,
+      storage: createJSONStorage(() => localStorage),
+      migrate,
+      // v1 → v2 兼容:旧 key 读一次后立刻写回 v2 并删 v1
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        // defaultModel 合法性校验(替代旧 resolveDefaultModel module-scope 求值)
+        state.defaultModel = resolveDefaultModel(state.defaultModel);
+        // 一次性 v1 迁移:把 v1 key 的内容搬到 v2,然后删 v1
+        try {
+          const legacy = localStorage.getItem(LEGACY_KEY);
+          if (legacy) {
+            const parsed = JSON.parse(legacy) as Partial<Persisted>;
+            // 仅当 v2 还没写入时迁移
+            if (parsed.defaultModel && isModelKnown(parsed.defaultModel)) {
+              state.defaultModel = parsed.defaultModel;
+            }
+            if (parsed.theme) state.theme = parsed.theme;
+            if (typeof parsed.defaultThinkingEnabled === 'boolean') {
+              state.defaultThinkingEnabled = parsed.defaultThinkingEnabled;
+            }
+            if (typeof parsed.defaultThinkingBudget === 'number') {
+              state.defaultThinkingBudget = parsed.defaultThinkingBudget;
+            }
+            localStorage.removeItem(LEGACY_KEY);
+          }
+        } catch {
+          // ignore
+        }
+      },
+      // 只持久化字段,排除函数
+      partialize: (s) => ({
+        theme: s.theme,
+        defaultModel: s.defaultModel,
+        defaultThinkingEnabled: s.defaultThinkingEnabled,
+        defaultThinkingBudget: s.defaultThinkingBudget,
+      }),
+    },
+  ),
+);
 
 /** 在文档根上应用 theme class */
 export function applyTheme(theme: Theme): void {

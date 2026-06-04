@@ -2,6 +2,7 @@
  * ApiKeyTab + ProviderKeyCard (v1.3 重构,从 SettingsDialog 拆出)
  *
  * 渲染每个 provider 的 Key 输入卡片。
+ * v1.3:删 window.confirm,改用统一的 ConfirmDialog。
  */
 
 import { useState } from 'react';
@@ -15,6 +16,7 @@ import { ALL_PROVIDER_IDS, PROVIDERS, type ProviderId } from '@/types/providers'
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export function ApiKeyTab() {
   const { keys, saveKey, removeKey, refreshOne } = useSettings();
@@ -48,19 +50,21 @@ export function ProviderKeyCard({
   state,
   onSave,
   onRemove,
+  onRefresh,
 }: ProviderKeyCardProps) {
   const meta = PROVIDERS[provider];
   const [input, setInput] = useState('');
   const [show, setShow] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   // v1.2 Bug 3.2:保存 Key 成功后,触发该 provider 的动态模型拉取
-  const { fetchProvider } = useModels();
+  // v1.3:retry 暴露给 ApiKeyTab,错误状态可手动重试
+  const { fetchProvider, retry } = useModels();
 
   const handleSave = async () => {
     if (!input.trim()) return;
     try {
       await onSave(input.trim());
       setInput('');
-      // 不 await:fetchProvider 自己有 24h 缓存,后台拉取不阻塞 UI
       void fetchProvider(provider);
     } catch {
       // error 在 state 里
@@ -134,11 +138,7 @@ export function ProviderKeyCard({
           <Button
             variant="ghost"
             size="sm"
-            onClick={async () => {
-              if (window.confirm(`确认删除已保存的 ${meta.label} API Key?`)) {
-                await onRemove();
-              }
-            }}
+            onClick={() => setConfirmOpen(true)}
             disabled={state.saving}
           >
             <Trash2Icon className="size-3.5" />
@@ -148,10 +148,30 @@ export function ProviderKeyCard({
       </div>
 
       {state.error && (
-        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-          {state.error}
+        <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+          <span className="flex-1 truncate">{state.error}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={async () => {
+              await onRefresh();
+              await retry(provider);
+            }}
+          >
+            重试
+          </Button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={`删除 ${meta.label} API Key`}
+        description="确认删除已保存的 API Key?此操作不可撤销。"
+        confirmText="删除"
+        destructive
+        onConfirm={onRemove}
+      />
     </div>
   );
 }

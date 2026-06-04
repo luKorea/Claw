@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -33,6 +34,7 @@ export function PromptsPanel({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [content, setContent] = useState('');
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
 
   const selected = prompts.list.find((p) => p.id === selectedId);
 
@@ -63,7 +65,6 @@ export function PromptsPanel({
 
   const remove = async () => {
     if (!selected || selected.builtin) return;
-    if (!window.confirm(`删除预设「${selected.name}」？`)) return;
     await prompts.remove(selected.id);
     setSelectedId(null);
   };
@@ -155,7 +156,7 @@ export function PromptsPanel({
                     variant="ghost"
                     size="sm"
                     className="text-destructive hover:text-destructive"
-                    onClick={remove}
+                    onClick={() => setConfirmRemoveOpen(true)}
                   >
                     <Trash2Icon className="size-4" />
                   </Button>
@@ -180,6 +181,16 @@ export function PromptsPanel({
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmRemoveOpen}
+        onOpenChange={setConfirmRemoveOpen}
+        title={`删除预设「${selected?.name ?? ''}」`}
+        description="此操作不可撤销。"
+        confirmText="删除"
+        destructive
+        onConfirm={remove}
+      />
     </div>
   );
 }

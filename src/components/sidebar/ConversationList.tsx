@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn } from '@/lib/utils';
 
 function formatTime(ts: number): string {
@@ -46,6 +47,7 @@ function ConversationItem({
 }: ItemProps) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(title);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   return (
     <div
@@ -110,17 +112,23 @@ function ConversationItem({
           </DropdownMenuItem>
           <DropdownMenuItem
             className="text-destructive focus:text-destructive"
-            onSelect={() => {
-              if (window.confirm(`删除会话「${title}」？此操作不可撤销。`)) {
-                onDelete();
-              }
-            }}
+            onSelect={() => setConfirmDeleteOpen(true)}
           >
             <Trash2Icon className="size-3.5" />
             删除
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title={`删除会话「${title}」`}
+        description="此操作不可撤销。"
+        confirmText="删除"
+        destructive
+        onConfirm={onDelete}
+      />
     </div>
   );
 }
@@ -129,6 +137,9 @@ export function ConversationList() {
   const conv = useConversations();
   // v1.3:selector 化,只订阅用到的 isStreaming,避免流式时整侧栏 re-render
   const isStreaming = useChatStore((s) => s.isStreaming);
+  // 切换会话时的中断确认弹窗(单一 state 服务整侧栏,任一会话点击都会触发)
+  const [confirmSwitchOpen, setConfirmSwitchOpen] = useState(false);
+  const [pendingSelect, setPendingSelect] = useState<string | null>(null);
 
   if (conv.list.length === 0) {
     return (
@@ -140,6 +151,15 @@ export function ConversationList() {
     );
   }
 
+  const requestSelect = (id: string) => {
+    if (isStreaming) {
+      setPendingSelect(id);
+      setConfirmSwitchOpen(true);
+      return;
+    }
+    void conv.selectConversation(id);
+  };
+
   return (
     <ScrollArea className="flex-1">
       <div className="space-y-0.5 px-2">
@@ -150,17 +170,27 @@ export function ConversationList() {
             title={c.title}
             updatedAt={c.updated_at}
             active={conv.currentId === c.id}
-            onSelect={async () => {
-              if (isStreaming) {
-                if (!window.confirm('正在生成回复中，切换会话会中断当前回复。继续？')) return;
-              }
-              await conv.selectConversation(c.id);
-            }}
+            onSelect={() => requestSelect(c.id)}
             onRename={(newTitle) => conv.update({ id: c.id, title: newTitle })}
             onDelete={() => conv.remove(c.id)}
           />
         ))}
       </div>
+
+      <ConfirmDialog
+        open={confirmSwitchOpen}
+        onOpenChange={(o) => {
+          setConfirmSwitchOpen(o);
+          if (!o) setPendingSelect(null);
+        }}
+        title="中断当前回复?"
+        description="正在生成回复中,切换会话会中断当前回复。继续?"
+        confirmText="继续"
+        onConfirm={async () => {
+          if (pendingSelect) await conv.selectConversation(pendingSelect);
+          setPendingSelect(null);
+        }}
+      />
     </ScrollArea>
   );
 }

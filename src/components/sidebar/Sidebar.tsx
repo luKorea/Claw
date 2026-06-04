@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { MessageSquarePlusIcon, SettingsIcon } from 'lucide-react';
 
 import { useConversations } from '@/hooks/useConversations';
@@ -13,6 +14,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 interface SidebarProps {
   onOpenSettings: () => void;
@@ -23,6 +25,15 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
   const isStreaming = useChatStore((s) => s.isStreaming);
   const theme = useSettingsStore((s) => s.theme);
   const setTheme = useSettingsStore((s) => s.setTheme);
+  const [confirmInterruptOpen, setConfirmInterruptOpen] = useState(false);
+
+  const handleNew = async () => {
+    if (isStreaming) {
+      setConfirmInterruptOpen(true);
+      return;
+    }
+    await conv.createNew();
+  };
 
   return (
     <aside className="bg-sidebar text-sidebar-foreground flex h-full w-64 shrink-0 flex-col border-r">
@@ -32,12 +43,7 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
             <Button
               variant="outline"
               className="flex-1 justify-start gap-2"
-              onClick={async () => {
-                if (isStreaming) {
-                  if (!window.confirm('正在生成回复中，新建会话会中断当前回复。继续？')) return;
-                }
-                await conv.createNew();
-              }}
+              onClick={() => void handleNew()}
             >
               <MessageSquarePlusIcon className="size-4" />
               新建会话
@@ -72,6 +78,17 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
           设置
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={confirmInterruptOpen}
+        onOpenChange={setConfirmInterruptOpen}
+        title="中断当前回复?"
+        description="正在生成回复中,新建会话会中断当前回复。继续?"
+        confirmText="继续"
+        onConfirm={async () => {
+          await conv.createNew();
+        }}
+      />
     </aside>
   );
 }

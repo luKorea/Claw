@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from '@testing-library/react';
 
 import { applyTheme, isModelKnown, useSettingsStore } from '@/stores/settings';
-import { DEFAULT_THINKING_BUDGET } from '@/types/claude';
 import { DEFAULT_MODEL_ID } from '@/types/providers';
 
 const STORAGE_KEY = 'claw.settings.v2';
@@ -11,12 +11,6 @@ describe('stores/settings', () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.classList.remove('dark', 'light');
-    useSettingsStore.setState({
-      theme: 'dark',
-      defaultModel: DEFAULT_MODEL_ID,
-      defaultThinkingEnabled: false,
-      defaultThinkingBudget: DEFAULT_THINKING_BUDGET,
-    });
   });
 
   describe('isModelKnown', () => {
@@ -31,35 +25,31 @@ describe('stores/settings', () => {
     });
   });
 
-  describe('持久化 / 迁移(loadPersisted 内部函数,通过 resetModules 触发 module-scope 重新求值)', () => {
-    /**
-     * 关键:`@/stores/settings` 是 module-scope 创建 zustand store,`loadPersisted()` 只在模块首次求值时调用。
-     * `vi.resetModules()` + 重新 `await import()` 拿到一份新的 module 实例,从而触发 `loadPersisted()` 重新读 localStorage。
-     */
-    async function loadFresh() {
-      vi.resetModules();
-      return import('@/stores/settings');
-    }
-
-    it('v2 有值时,store 从 localStorage 读取', async () => {
+  describe('persist middleware', () => {
+    it('v2 有值时,rehydrate 后 store 从 localStorage 读取', async () => {
       localStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({
-          theme: 'light',
-          defaultModel: 'claude-sonnet-4-6',
-          defaultThinkingEnabled: true,
-          defaultThinkingBudget: 8_000,
+          state: {
+            theme: 'light',
+            defaultModel: 'claude-sonnet-4-6',
+            defaultThinkingEnabled: true,
+            defaultThinkingBudget: 8_000,
+          },
+          version: 2,
         }),
       );
-      const m = await loadFresh();
-      const s = m.useSettingsStore.getState();
+      await act(async () => {
+        await useSettingsStore.persist.rehydrate();
+      });
+      const s = useSettingsStore.getState();
       expect(s.theme).toBe('light');
       expect(s.defaultModel).toBe('claude-sonnet-4-6');
       expect(s.defaultThinkingEnabled).toBe(true);
       expect(s.defaultThinkingBudget).toBe(8_000);
     });
 
-    it('v1 → v2 迁移:写 v1 时,store 读 v1 并写回 v2', async () => {
+    it('v1 → v2 迁移:rehydrate 时读 v1 key 并删 v1', async () => {
       localStorage.setItem(
         LEGACY_KEY,
         JSON.stringify({
@@ -69,22 +59,27 @@ describe('stores/settings', () => {
           defaultThinkingBudget: 4_000,
         }),
       );
-      const m = await loadFresh();
-      const s = m.useSettingsStore.getState();
+      await act(async () => {
+        await useSettingsStore.persist.rehydrate();
+      });
+      const s = useSettingsStore.getState();
       expect(s.defaultModel).toBe('gpt-5');
-      // 迁移后 v2 已被写入
-      expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
-      const v2 = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
-      expect(v2.defaultModel).toBe('gpt-5');
+      // 迁移后 v1 应被删除
+      expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
     });
 
     it('persisted 非法 modelId fallback 到 DEFAULT_MODEL_ID', async () => {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ defaultModel: 'unknown-model-xyz', theme: 'dark' }),
+        JSON.stringify({
+          state: { defaultModel: 'unknown-model-xyz', theme: 'dark' },
+          version: 2,
+        }),
       );
-      const m = await loadFresh();
-      expect(m.useSettingsStore.getState().defaultModel).toBe(DEFAULT_MODEL_ID);
+      await act(async () => {
+        await useSettingsStore.persist.rehydrate();
+      });
+      expect(useSettingsStore.getState().defaultModel).toBe(DEFAULT_MODEL_ID);
     });
   });
 
@@ -94,11 +89,15 @@ describe('stores/settings', () => {
       expect(useSettingsStore.getState().defaultModel).toBe('claude-sonnet-4-6');
     });
 
-    it('setDefaultModel 持久化到 localStorage(v1.2 Bug 2 回归保护)', () => {
-      // 旧测试只校验内存 state,漏掉了 persist(get()) 写盘这一步
+    it('setDefaultModel 持久化到 localStorage', async () => {
       useSettingsStore.getState().setDefaultModel('claude-haiku-4-5-20251001');
-      const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
-      expect(persisted.defaultModel).toBe('claude-haiku-4-5-20251001');
+      // persist 中间件写入是同步的
+      const raw = localStorage.getItem(STORAGE_KEY);
+      expect(raw).not.toBeNull();
+      const persisted = JSON.parse(raw ?? '{}');
+      // zustand persist 写入格式:{ state, version }
+      const inner = persisted.state ?? persisted;
+      expect(inner.defaultModel).toBe('claude-haiku-4-5-20251001');
     });
 
     it('setDefaultModel 拒绝未知 id(静默,不更新不抛错)', () => {
@@ -110,9 +109,12 @@ describe('stores/settings', () => {
     it('setDefaultThinkingEnabled / setDefaultThinkingBudget 持久化', () => {
       useSettingsStore.getState().setDefaultThinkingEnabled(true);
       useSettingsStore.getState().setDefaultThinkingBudget(16_000);
-      const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
-      expect(persisted.defaultThinkingEnabled).toBe(true);
-      expect(persisted.defaultThinkingBudget).toBe(16_000);
+      const raw = localStorage.getItem(STORAGE_KEY);
+      expect(raw).not.toBeNull();
+      const persisted = JSON.parse(raw ?? '{}');
+      const inner = persisted.state ?? persisted;
+      expect(inner.defaultThinkingEnabled).toBe(true);
+      expect(inner.defaultThinkingBudget).toBe(16_000);
     });
   });
 
@@ -132,7 +134,6 @@ describe('stores/settings', () => {
     });
 
     it('system 跟随 prefers-color-scheme', () => {
-      // jsdom 默认没有 matchMedia,补一个 stub
       Object.defineProperty(window, 'matchMedia', {
         writable: true,
         value: vi.fn().mockImplementation((query: string) => ({
@@ -147,7 +148,6 @@ describe('stores/settings', () => {
         })),
       });
       applyTheme('system');
-      // 跟随 mock 返回 false → 'light'
       expect(document.documentElement.classList.contains('light')).toBe(true);
     });
   });

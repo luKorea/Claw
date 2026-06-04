@@ -1,22 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SendHorizontalIcon, SquareIcon, SparklesIcon } from 'lucide-react';
+import { SendHorizontalIcon, SquareIcon } from 'lucide-react';
 import { useHotkeys } from 'react-hotkeys-hook';
 
 import { useChat } from '@/hooks/useChat';
 import { useConversations } from '@/hooks/useConversations';
 import { usePrompts } from '@/hooks/usePrompts';
+import { useTimeoutMessage } from '@/hooks/useTimeoutMessage';
 
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { PresetDropdown } from '@/components/chat/PresetDropdown';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -28,7 +22,7 @@ const MAX_ROWS = 12;
 
 export function MessageInput({ onSend, className }: Props) {
   const [text, setText] = useState('');
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, showToast] = useTimeoutMessage(2000);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { send, cancel, isStreaming, error } = useChat();
   // v1.2 Bug 4:读当前会话的 system_prompt(预设被应用后会写入这里),并在 send 时透传
@@ -39,12 +33,6 @@ export function MessageInput({ onSend, className }: Props) {
   useEffect(() => {
     void refreshPrompts();
   }, [refreshPrompts]);
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2000);
-    return () => clearTimeout(t);
-  }, [toast]);
 
   const submit = useCallback(async () => {
     const value = text.trim();
@@ -67,18 +55,18 @@ export function MessageInput({ onSend, className }: Props) {
     async (presetId: string) => {
       const preset = prompts.find((p) => p.id === presetId);
       if (!preset || !current) {
-        setToast('无法应用预设(无当前会话)');
+        showToast('无法应用预设(无当前会话)');
         return;
       }
       try {
         await updateConv({ id: current.id, system_prompt: preset.content });
-        setToast(`已应用预设:${preset.name}`);
+        showToast(`已应用预设:${preset.name}`);
       } catch (e) {
-        setToast('应用预设失败');
+        showToast('应用预设失败');
         console.warn('apply preset failed', e);
       }
     },
-    [prompts, current, updateConv],
+    [prompts, current, updateConv, showToast],
   );
 
   useHotkeys(
@@ -126,55 +114,12 @@ export function MessageInput({ onSend, className }: Props) {
             error && 'border-destructive/50',
           )}
         >
-          {/* v1.2 Bug 4:[预设] 按钮(下拉),列出全部预设 */}
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    className="size-8 shrink-0"
-                    aria-label="应用提示词预设"
-                    disabled={isStreaming || !current}
-                  >
-                    <SparklesIcon className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>应用提示词预设</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="start" className="w-64 max-h-80">
-              <DropdownMenuLabel>提示词预设</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {prompts.length === 0 && (
-                <div className="px-2 py-3 text-xs text-muted-foreground">
-                  暂无预设,在「设置 → 提示词」中新建
-                </div>
-              )}
-              {prompts.map((p) => (
-                <DropdownMenuItem
-                  key={p.id}
-                  onSelect={() => void applyPreset(p.id)}
-                  className="flex flex-col items-start gap-0.5"
-                >
-                  <div className="flex w-full items-center gap-2">
-                    <span className="truncate text-sm">{p.name}</span>
-                    {p.builtin === 1 && (
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        内置
-                      </span>
-                    )}
-                  </div>
-                  {p.content && (
-                    <span className="line-clamp-2 text-xs text-muted-foreground">
-                      {p.content}
-                    </span>
-                  )}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* v1.3:抽出 PresetDropdown,组件只负责展示 + 选择,逻辑外置 */}
+          <PresetDropdown
+            presets={prompts}
+            disabled={isStreaming || !current}
+            onApply={(id) => void applyPreset(id)}
+          />
 
           <Textarea
             ref={textareaRef}

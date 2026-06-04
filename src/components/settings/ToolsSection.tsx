@@ -1,4 +1,5 @@
 import { useToolsStore } from '@/stores/tools';
+import { useToolEnabled } from '@/hooks/useToolEnabled';
 import { BUILTIN_TOOLS } from '@/lib/tools/builtin';
 
 import { Card } from '@/components/ui/card';
@@ -6,10 +7,38 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 
-export function ToolsSection() {
-  const disabled = useToolsStore((s) => s.disabled);
+function ToolRow({ name, description }: { name: string; description: string }) {
+  // v1.3:细粒度 selector,只在该 tool 启用状态变化时重渲
+  const isEnabled = useToolEnabled(name);
   const setDisabled = useToolsStore((s) => s.setDisabled);
 
+  return (
+    <Card className="flex items-start gap-3 p-3">
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-sm">{name}</span>
+          {name === 'write_file' && (
+            <Badge variant="destructive" className="text-[10px]">
+              危险
+            </Badge>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex items-center gap-2 pt-1">
+        <Label className="text-xs text-muted-foreground">
+          {isEnabled ? '启用' : '禁用'}
+        </Label>
+        <Switch
+          checked={isEnabled}
+          onCheckedChange={(v) => setDisabled(name, !v)}
+        />
+      </div>
+    </Card>
+  );
+}
+
+export function ToolsSection() {
   return (
     <div className="space-y-3">
       <div>
@@ -20,33 +49,9 @@ export function ToolsSection() {
       </div>
 
       <div className="space-y-2">
-        {BUILTIN_TOOLS.map((tool) => {
-          const isEnabled = !disabled.includes(tool.name);
-          return (
-            <Card key={tool.name} className="flex items-start gap-3 p-3">
-              <div className="min-w-0 flex-1 space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-sm">{tool.name}</span>
-                  {tool.name === 'write_file' && (
-                    <Badge variant="destructive" className="text-[10px]">
-                      危险
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">{tool.description}</p>
-              </div>
-              <div className="flex items-center gap-2 pt-1">
-                <Label className="text-xs text-muted-foreground">
-                  {isEnabled ? '启用' : '禁用'}
-                </Label>
-                <Switch
-                  checked={isEnabled}
-                  onCheckedChange={(v) => setDisabled(tool.name, !v)}
-                />
-              </div>
-            </Card>
-          );
-        })}
+        {BUILTIN_TOOLS.map((tool) => (
+          <ToolRow key={tool.name} name={tool.name} description={tool.description} />
+        ))}
       </div>
 
       <p className="text-xs text-muted-foreground">
