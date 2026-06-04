@@ -1,3 +1,13 @@
+/**
+ * useChat hook (v1.3 重构)
+ *
+ * 业务层只负责"事件订阅 + 副作用分发":
+ * - `send(opts)` 准备 ctx,启动 `runChatTurn(ctx)` generator
+ * - `for await` 消费 event,根据 type 调 store action / 落库 / 收集 tool_result
+ * - 跨 await 用 `useChatStore.getState()` 拿最新,绕闭包
+ * - 暴露 { send, cancel, isStreaming, error },messages 由组件自己 selector
+ */
+
 import { useCallback, useRef } from 'react';
 
 import { useChatStore } from '@/stores/chat';
@@ -5,21 +15,17 @@ import { useConversationsStore } from '@/stores/conversations';
 import { useSettingsStore } from '@/stores/settings';
 import { useToolsStore } from '@/stores/tools';
 import { now, uuid } from '@/lib/utils';
-
-import {
-  buildAdapterMessages,
-  resolveAnthropicMaxTokens,
-  selectAdapter,
-  type AdapterRequest,
-} from '@/lib/providers';
-import { consumeStream } from '@/lib/streaming';
-import { conversationApi, messageApi } from '@/lib/db';
 import { getApiKey } from '@/lib/keyring';
 import { filterEnabled } from '@/lib/tools/builtin';
-import { executeBuiltinTool } from '@/lib/tools/executor';
-
-import type { ChatMessage, ContentBlock, Usage } from '@/types/claude';
+import { conversationApi, messageApi } from '@/lib/db';
 import { getModelInfo, getProviderOfModel } from '@/types/providers';
+import type { ChatMessage, ContentBlock, Usage } from '@/types/claude';
+import {
+  runChatTurn,
+  resolveMaxTokens,
+  serializeAssistantContent,
+  type EngineEvent,
+} from '@/lib/chat-engine';
 
 export interface SendOptions {
   text: string;
@@ -29,432 +35,327 @@ export interface SendOptions {
   thinkingBudget?: number;
 }
 
-const MAX_TOOL_ROUNDS = 5;
+interface ToolResult {
+  tool_use_id: string;
+  content: string;
+  is_error: boolean;
+}
 
 export function useChat() {
-  // v1.3 重构:逐字段 selector 订阅,避免整 store 订阅导致的整 hook 重渲
-  const setConversation = useChatStore((s) => s.setConversation);
-  const appendMessage = useChatStore((s) => s.appendMessage);
-  const appendContentBlock = useChatStore((s) => s.appendContentBlock);
-  const updateMessage = useChatStore((s) => s.updateMessage);
-  const finalizeMessage = useChatStore((s) => s.finalizeMessage);
-  const setStreaming = useChatStore((s) => s.setStreaming);
-  const setError = useChatStore((s) => s.setError);
+  // v1.3:细粒度 selector,避免整 store 订阅
   const isStreaming = useChatStore((s) => s.isStreaming);
   const error = useChatStore((s) => s.error);
 
-  // 跨 store 的稳定引用(其他 store 已是 selector 模式)
-  const conversationsList = useConversationsStore((s) => s.list);
-  const upsertConv = useConversationsStore((s) => s.upsert);
-  const setCurrentConv = useConversationsStore((s) => s.setCurrent);
-  const defaultModel = useSettingsStore((s) => s.defaultModel);
-  const defaultThinking = useSettingsStore((s) => s.defaultThinkingEnabled);
-  const defaultBudget = useSettingsStore((s) => s.defaultThinkingBudget);
-  const disabledTools = useToolsStore((s) => s.disabled);
-
   const abortRef = useRef<AbortController | null>(null);
   const sendingRef = useRef(false);
+  // toolResultsBuffer 闭包到 generator,跨轮复用
+  const toolResultsRef = useRef<ToolResult[]>([]);
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
     sendingRef.current = false;
-    setStreaming(false);
-  }, [setStreaming]);
+    useChatStore.getState().setStreaming(false);
+  }, []);
 
-  const send = useCallback(
-    async (opts: SendOptions) => {
-      const text = opts.text.trim();
-      if (!text) return;
-      if (sendingRef.current) {
-        throw new Error('正在处理上一条消息,请稍候');
-      }
+  const send = useCallback(async (opts: SendOptions) => {
+    const text = opts.text.trim();
+    if (!text) return;
+    if (sendingRef.current) {
+      throw new Error('正在处理上一条消息，请稍候');
+    }
 
-      // 解析 model 与 provider
-      const model = opts.model ?? defaultModel;
-      const modelInfo = getModelInfo(model);
-      const provider = modelInfo ? modelInfo.provider : getProviderOfModel(model);
-      if (!provider) {
-        setError(`未知模型: ${model}`);
-        throw new Error(`未知模型: ${model}`);
-      }
+    // 1. 解析 model / provider / key
+    const chatState = useChatStore.getState();
+    const model = opts.model ?? useSettingsStore.getState().defaultModel;
+    const modelInfo = getModelInfo(model);
+    const provider = modelInfo ? modelInfo.provider : getProviderOfModel(model);
+    if (!provider) {
+      chatState.setError(`未知模型: ${model}`);
+      throw new Error(`未知模型: ${model}`);
+    }
 
-      // 取 key
-      let apiKey: string;
-      try {
-        apiKey = await getApiKey(provider);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '未配置 API Key');
-        throw err;
-      }
+    let apiKey: string;
+    try {
+      apiKey = await getApiKey(provider);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '未配置 API Key';
+      useChatStore.getState().setError(msg);
+      throw err;
+    }
 
-      // 确保有当前会话
-      // v1.3 修复:跨 await 用 getState() 拿最新 conversationId,避免闭包陷阱
-      let conversationId = useChatStore.getState().conversationId;
-      let conv =
-        conversationsList.find((c) => c.id === conversationId) ?? null;
-      if (!conv) {
-        const created = await conversationApi.create({
-          title: text.slice(0, 20),
-          model,
-          system_prompt: opts.system ?? null,
-          thinking_enabled: opts.thinkingEnabled ?? defaultThinking,
-          thinking_budget: opts.thinkingBudget ?? defaultBudget,
+    // 2. 确保有当前会话
+    let conversationId = useChatStore.getState().conversationId;
+    let conv = useConversationsStore
+      .getState()
+      .list.find((c) => c.id === conversationId) ?? null;
+    if (!conv) {
+      const settings = useSettingsStore.getState();
+      const created = await conversationApi.create({
+        title: text.slice(0, 20),
+        model,
+        system_prompt: opts.system ?? null,
+        thinking_enabled: opts.thinkingEnabled ?? settings.defaultThinkingEnabled,
+        thinking_budget: opts.thinkingBudget ?? settings.defaultThinkingBudget,
+      });
+      useConversationsStore.getState().upsert(created);
+      useConversationsStore.getState().setCurrent(created.id);
+      useChatStore.getState().setConversation(created.id, []);
+      conversationId = created.id;
+      conv = created;
+    } else if (
+      opts.model ||
+      opts.system !== undefined ||
+      opts.thinkingEnabled !== undefined ||
+      opts.thinkingBudget !== undefined
+    ) {
+      const patch: Parameters<typeof conversationApi.update>[0] = { id: conv.id };
+      if (opts.model) patch.model = opts.model;
+      if (opts.system !== undefined) patch.system_prompt = opts.system;
+      if (opts.thinkingEnabled !== undefined) patch.thinking_enabled = opts.thinkingEnabled;
+      if (opts.thinkingBudget !== undefined) patch.thinking_budget = opts.thinkingBudget;
+      await conversationApi.update(patch);
+      const refreshed = await conversationApi.get(conv.id);
+      useConversationsStore.getState().upsert(refreshed);
+      conv = refreshed;
+    }
+
+    sendingRef.current = true;
+    useChatStore.getState().setStreaming(true);
+    useChatStore.getState().setError(null);
+
+    // 3. user message
+    const userMsg: ChatMessage = {
+      id: uuid(),
+      role: 'user',
+      content: [{ type: 'text', text }],
+      createdAt: now(),
+    };
+    useChatStore.getState().appendMessage(userMsg);
+    if (conversationId) {
+      await messageApi
+        .save({
+          id: userMsg.id,
+          conversation_id: conversationId,
+          role: 'user',
+          content: JSON.stringify(userMsg.content),
+          thinking: null,
+          tool_calls: null,
+          tool_results: null,
+          model: null,
+          usage: null,
+        })
+        .catch((e) => console.warn('save user message failed', e));
+    }
+
+    const thinkingEnabled = opts.thinkingEnabled ?? Boolean(conv.thinking_enabled);
+    const thinkingBudget =
+      opts.thinkingBudget ?? conv.thinking_budget ?? useSettingsStore.getState().defaultThinkingBudget;
+    const system = opts.system ?? conv.system_prompt ?? undefined;
+    const supportsThinking = modelInfo?.supportsThinking ?? false;
+    const thinking =
+      thinkingEnabled && supportsThinking ? { budget_tokens: thinkingBudget } : null;
+
+    const enabledTools = filterEnabled(useToolsStore.getState().disabled);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    toolResultsRef.current = [];
+
+    // 4. 订阅 event 流
+    let lastAssistantId: string | null = null;
+    let lastUsage: Usage | null = null;
+    try {
+      const gen = runChatTurn({
+        provider,
+        apiKey,
+        model,
+        system,
+        thinking,
+        maxTokens: resolveMaxTokens(provider, thinking),
+        tools: enabledTools,
+        history: () => useChatStore.getState().messages,
+        toolResultsBuffer: toolResultsRef.current,
+        nextAssistantId: () => uuid(),
+        signal: controller.signal,
+      });
+
+      for await (const ev of gen) {
+        await handleEngineEvent(ev, {
+          onToolResult: (tr) => {
+            toolResultsRef.current.push(tr);
+            // 同时把 tool_result 写进当前 assistant message content
+            if (lastAssistantId) {
+              useChatStore.getState().appendContentBlock(lastAssistantId, {
+                type: 'tool_result',
+                tool_use_id: tr.tool_use_id,
+                content: tr.content,
+                is_error: tr.is_error,
+              });
+            }
+          },
+          onPersist: (blocks) => {
+            const assistantId = lastAssistantId;
+            const convId = conversationId;
+            if (assistantId && convId) {
+              const { content, thinking: t, toolCalls } = serializeAssistantContent(blocks);
+              void messageApi
+                .remove(assistantId)
+                .catch(() => {})
+                .then(() =>
+                  messageApi.save({
+                    id: assistantId,
+                    conversation_id: convId,
+                    role: 'assistant',
+                    content,
+                    thinking: t,
+                    tool_calls: toolCalls,
+                    tool_results: null,
+                    model,
+                    usage: lastUsage ? JSON.stringify(lastUsage) : null,
+                  }),
+                )
+                .catch((e) => console.warn('save assistant message failed', e));
+            }
+          },
         });
-        upsertConv(created);
-        setCurrentConv(created.id);
-        setConversation(created.id, []);
-        conversationId = created.id;
-        conv = created;
-      } else if (
-        opts.model ||
-        opts.system !== undefined ||
-        opts.thinkingEnabled !== undefined
-      ) {
-        const patch: Parameters<typeof conversationApi.update>[0] = { id: conv.id };
-        if (opts.model) patch.model = opts.model;
-        if (opts.system !== undefined) patch.system_prompt = opts.system;
-        if (opts.thinkingEnabled !== undefined)
-          patch.thinking_enabled = opts.thinkingEnabled;
-        if (opts.thinkingBudget !== undefined)
-          patch.thinking_budget = opts.thinkingBudget;
-        await conversationApi.update(patch);
-        const refreshed = await conversationApi.get(conv.id);
-        upsertConv(refreshed);
-        conv = refreshed;
-      }
-
-      sendingRef.current = true;
-      setStreaming(true);
-      setError(null);
-
-      // 1. user message
-      const userMsg: ChatMessage = {
-        id: uuid(),
-        role: 'user',
-        content: [{ type: 'text', text }],
-        createdAt: now(),
-      };
-      appendMessage(userMsg);
-      const convId = conversationId;
-      if (convId) {
-        await messageApi
-          .save({
-            id: userMsg.id,
-            conversation_id: convId,
-            role: 'user',
-            content: JSON.stringify(userMsg.content),
-            thinking: null,
-            tool_calls: null,
-            tool_results: null,
-            model: null,
-            usage: null,
-          })
-          .catch((e) => console.warn('save user message failed', e));
-      }
-
-      const thinkingEnabled =
-        opts.thinkingEnabled ?? Boolean(conv.thinking_enabled);
-      const thinkingBudget =
-        opts.thinkingBudget ?? conv.thinking_budget ?? defaultBudget;
-      const system = opts.system ?? conv.system_prompt ?? undefined;
-
-      const enabledTools = filterEnabled(disabledTools);
-      const adapter = selectAdapter(provider);
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      let round = 0;
-
-      // 当前累积的 assistant 消息
-      let currentAssistant: ChatMessage = createAssistantPlaceholder(model);
-      appendMessage(currentAssistant);
-
-      // 工具结果累积(每轮更新)
-      const toolResultsBuffer: Array<{
-        tool_use_id: string;
-        content: string;
-        is_error: boolean;
-      }> = [];
-
-      try {
-        while (round < MAX_TOOL_ROUNDS) {
-          round += 1;
-
-          // v1.3 修复:跨 await 后必须用 getState() 取最新 messages,
-          // 否则 round≥2 时 historyMessages 漏掉刚 append 的 assistant + tool_result
-          const liveMessages = useChatStore.getState().messages;
-          const historyMessages = liveMessages
-            .filter(
-              (m) => m.id !== currentAssistant.id || toolResultsBuffer.length > 0,
-            )
-            .concat(
-              toolResultsBuffer.length > 0
-                ? ([
-                    {
-                      id: uuid(),
-                      role: 'assistant' as const,
-                      content: [],
-                      createdAt: now(),
-                    },
-                  ] as ChatMessage[])
-                : [],
-            );
-
-          // 工具结果注入为独立 tool 消息(由 adapter 决定合并方式)
-          const messages = buildAdapterMessages(historyMessages, system);
-
-          // 注入 tool_result(基于 contentBlock 形式)
-          for (const tr of toolResultsBuffer) {
-            messages.push({
-              role: 'tool',
-              content: tr.content,
-              tool_call_id: tr.tool_use_id,
-            });
-          }
-
-          // 过滤空 assistant
-          const cleanMessages = messages.filter(
-            (m) =>
-              !(
-                m.role === 'assistant' &&
-                typeof m.content === 'string' &&
-                !m.content &&
-                (!m.tool_calls || m.tool_calls.length === 0)
-              ),
-          );
-
-          // thinking 能力由 modelInfo 决定
-          const supportsThinking = modelInfo?.supportsThinking ?? false;
-          const thinking =
-            thinkingEnabled && supportsThinking
-              ? { budget_tokens: thinkingBudget }
-              : null;
-
-          const maxTokens =
-            provider === 'anthropic' ? resolveAnthropicMaxTokens(thinking) : 8192;
-
-          const req: AdapterRequest = {
-            model,
-            system,
-            messages: cleanMessages,
-            tools: enabledTools,
-            thinking,
-            max_tokens: maxTokens,
-          };
-
-          const collected: ContentBlock[] = [];
-          let textIdx = -1;
-          let thinkingIdx = -1;
-          let usage: Usage | null = null;
-
-          const sdkStream = adapter.stream(req, apiKey, controller.signal);
-
-          await consumeStream(sdkStream, {
-            onText: (delta) => {
-              if (textIdx === -1) {
-                appendContentBlock(currentAssistant.id, { type: 'text', text: delta });
-                textIdx = collected.length;
-                collected.push({ type: 'text', text: delta });
-              } else {
-                collected[textIdx] = {
-                  type: 'text',
-                  text:
-                    (collected[textIdx] as Extract<ContentBlock, { type: 'text' }>)
-                      .text + delta,
-                };
-                updateMessage(currentAssistant.id, (m) => mergeText(m, delta));
-              }
-            },
-            onThinking: (delta) => {
-              if (thinkingIdx === -1) {
-                appendContentBlock(currentAssistant.id, {
-                  type: 'thinking',
-                  thinking: delta,
-                });
-                thinkingIdx = collected.length;
-                collected.push({ type: 'thinking', thinking: delta });
-              } else {
-                collected[thinkingIdx] = {
-                  type: 'thinking',
-                  thinking:
-                    (collected[thinkingIdx] as Extract<
-                      ContentBlock,
-                      { type: 'thinking' }
-                    >).thinking + delta,
-                };
-                updateMessage(currentAssistant.id, (m) => mergeThinking(m, delta));
-              }
-            },
-            onToolUse: () => {
-              // 内容已通过 streaming 累积,这里只是回调
-            },
-            onUsage: (u) => {
-              usage = u;
-            },
-            onDone: (blocks) => {
-              collected.length = 0;
-              collected.push(...blocks);
-            },
-            onError: (err) => {
-              throw err;
-            },
-          });
-
-          // 检查是否有 tool_use
-          const toolUses = collected.filter(
-            (b): b is Extract<ContentBlock, { type: 'tool_use' }> =>
-              b.type === 'tool_use',
-          );
-
-          // 完成本轮 assistant 消息
-          finalizeMessage(currentAssistant.id, usage);
-
-          // 落库当前 assistant
-          const finalAssistant: ChatMessage = {
-            ...currentAssistant,
-            content: collected,
-            streaming: false,
-          };
-          await persistMessage(finalAssistant, usage, convId ?? '');
-
-          if (toolUses.length === 0) {
-            break;
-          }
-
-          // 执行工具
-          toolResultsBuffer.length = 0;
-          for (const tu of toolUses) {
-            const r = await executeBuiltinTool(tu.name, tu.input);
-            toolResultsBuffer.push({
-              tool_use_id: tu.id,
-              content: r.content,
-              is_error: !r.ok,
-            });
-          }
-
-          // 创建新一轮 assistant 占位
-          currentAssistant = createAssistantPlaceholder(model);
-          appendMessage(currentAssistant);
+        if (ev.type === 'turn_start') {
+          lastAssistantId = ev.messageId;
+        } else if (ev.type === 'turn_done') {
+          lastUsage = ev.usage;
         }
-      } catch (err) {
-        if (controller.signal.aborted) {
-          setError(null);
-        } else {
-          const msg = err instanceof Error ? err.message : String(err);
-          setError(msg);
-        }
-        updateMessage(currentAssistant.id, (m) => ({ ...m, streaming: false }));
-        sendingRef.current = false;
-        abortRef.current = null;
-        setStreaming(false);
-        return;
       }
-
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        const msg = err instanceof Error ? err.message : String(err);
+        useChatStore.getState().setError(msg);
+      }
+      if (lastAssistantId) {
+        useChatStore
+          .getState()
+          .updateMessage(lastAssistantId, (m) => ({ ...m, streaming: false }));
+      }
+    } finally {
       sendingRef.current = false;
       abortRef.current = null;
-      setStreaming(false);
-
+      useChatStore.getState().setStreaming(false);
       // 触发 session 列表 updated_at 刷新
       if (conversationId) {
         try {
           const refreshed = await conversationApi.get(conversationId);
-          upsertConv(refreshed);
+          useConversationsStore.getState().upsert(refreshed);
         } catch {
           // ignore
         }
       }
-    },
-    [
-      setConversation,
-      appendMessage,
-      appendContentBlock,
-      updateMessage,
-      finalizeMessage,
-      setStreaming,
-      setError,
-      conversationsList,
-      upsertConv,
-      setCurrentConv,
-      defaultModel,
-      defaultThinking,
-      defaultBudget,
-      disabledTools,
-    ],
-  );
-
-  return {
-    send,
-    cancel,
-    isStreaming,
-    error,
-  };
-}
-
-function createAssistantPlaceholder(model: string): ChatMessage {
-  return {
-    id: uuid(),
-    role: 'assistant',
-    content: [],
-    model,
-    streaming: true,
-    createdAt: now(),
-  };
-}
-
-function mergeText(m: ChatMessage, delta: string): ChatMessage {
-  const next = m.content.slice();
-  const idx = next.findIndex((b) => b.type === 'text');
-  if (idx === -1) {
-    next.push({ type: 'text', text: delta });
-  } else {
-    const cur = next[idx];
-    if (cur.type === 'text') {
-      next[idx] = { type: 'text', text: cur.text + delta };
     }
-  }
-  return { ...m, content: next };
+  }, []);
+
+  return { send, cancel, isStreaming, error };
 }
 
-function mergeThinking(m: ChatMessage, delta: string): ChatMessage {
-  const next = m.content.slice();
-  const idx = next.findIndex((b) => b.type === 'thinking');
-  if (idx === -1) {
-    next.push({ type: 'thinking', thinking: delta });
-  } else {
-    const cur = next[idx];
-    if (cur.type === 'thinking') {
-      next[idx] = { type: 'thinking', thinking: cur.thinking + delta };
-    }
-  }
-  return { ...m, content: next };
-}
-
-async function persistMessage(
-  msg: ChatMessage,
-  usage: Usage | null,
-  conversationId: string,
+/**
+ * 把 engine event 翻译成 store 副作用。
+ * 抽成单独函数,便于单测 + 主流程更线性。
+ */
+async function handleEngineEvent(
+  ev: EngineEvent,
+  hooks: {
+    onToolResult: (tr: ToolResult) => void;
+    onPersist: (blocks: ContentBlock[]) => void;
+  },
 ): Promise<void> {
-  await messageApi.remove(msg.id).catch(() => {});
-  await messageApi.save({
-    id: msg.id,
-    conversation_id: conversationId, // 修复 v1.0 的空字符串 bug
-    role: msg.role,
-    content: JSON.stringify(msg.content),
-    thinking:
-      msg.content
-        .filter((b): b is Extract<ContentBlock, { type: 'thinking' }> => b.type === 'thinking')
-        .map((b) => b.thinking)
-        .join('\n\n') || null,
-    tool_calls:
-      msg.content.filter((b) => b.type === 'tool_use').length > 0
-        ? JSON.stringify(msg.content.filter((b) => b.type === 'tool_use'))
-        : null,
-    tool_results:
-      msg.content.filter((b) => b.type === 'tool_result').length > 0
-        ? JSON.stringify(msg.content.filter((b) => b.type === 'tool_result'))
-        : null,
-    model: msg.model ?? null,
-    usage: usage ? JSON.stringify(usage) : null,
-  });
+  const store = useChatStore.getState();
+  switch (ev.type) {
+    case 'turn_start': {
+      // 在 store 里建 assistant 占位
+      store.appendMessage({
+        id: ev.messageId,
+        role: 'assistant',
+        content: [],
+        streaming: true,
+        createdAt: now(),
+      });
+      return;
+    }
+    case 'text_delta': {
+      // 第一个 delta 用 append,后续用 update 合并
+      const msg = store.messages.find((m) => m.id === ev.messageId);
+      if (!msg) return;
+      const hasText = msg.content.some((b) => b.type === 'text');
+      if (!hasText) {
+        store.appendContentBlock(ev.messageId, { type: 'text', text: ev.text });
+      } else {
+        store.updateMessage(ev.messageId, (m) => {
+          const next = m.content.slice();
+          const idx = next.findIndex((b) => b.type === 'text');
+          if (idx >= 0) {
+            const cur = next[idx];
+            if (cur.type === 'text') {
+              next[idx] = { type: 'text', text: cur.text + ev.text };
+            }
+          }
+          return { ...m, content: next };
+        });
+      }
+      return;
+    }
+    case 'thinking_delta': {
+      const msg = store.messages.find((m) => m.id === ev.messageId);
+      if (!msg) return;
+      const hasT = msg.content.some((b) => b.type === 'thinking');
+      if (!hasT) {
+        store.appendContentBlock(ev.messageId, { type: 'thinking', thinking: ev.thinking });
+      } else {
+        store.updateMessage(ev.messageId, (m) => {
+          const next = m.content.slice();
+          const idx = next.findIndex((b) => b.type === 'thinking');
+          if (idx >= 0) {
+            const cur = next[idx];
+            if (cur.type === 'thinking') {
+              next[idx] = { type: 'thinking', thinking: cur.thinking + ev.thinking };
+            }
+          }
+          return { ...m, content: next };
+        });
+      }
+      return;
+    }
+    case 'tool_use_start': {
+      store.appendContentBlock(ev.messageId, { type: 'tool_use', id: ev.id, name: ev.name, input: {} });
+      return;
+    }
+    case 'tool_use_end': {
+      store.updateMessage(ev.messageId, (m) => {
+        const next = m.content.map((b) =>
+          b.type === 'tool_use' && b.id === ev.id ? { ...b, input: ev.input } : b,
+        );
+        return { ...m, content: next };
+      });
+      return;
+    }
+    case 'turn_done': {
+      store.finalizeMessage(ev.messageId, ev.usage);
+      const msg = store.messages.find((m) => m.id === ev.messageId);
+      if (msg) hooks.onPersist(msg.content);
+      return;
+    }
+    case 'tool_result': {
+      hooks.onToolResult({
+        tool_use_id: ev.toolUseId,
+        content: ev.content,
+        is_error: ev.isError,
+      });
+      return;
+    }
+    case 'error': {
+      store.setError(ev.message);
+      return;
+    }
+    case 'aborted':
+    case 'final_done':
+    case 'tool_executing':
+    case 'tool_use_delta':
+      // 引擎内部细节,useChat 暂不消费
+      return;
+  }
 }
