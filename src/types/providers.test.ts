@@ -22,7 +22,13 @@ describe('types/providers', () => {
         const meta = PROVIDERS[id];
         expect(meta.id).toBe(id);
         expect(meta.label.length).toBeGreaterThan(0);
-        expect(meta.keyPlaceholder.startsWith('sk-')).toBe(true);
+        // v1.3:MiniMax 用 JWT 格式 (eyJ...),不再是 sk- 前缀。
+        // 其他三家 (anthropic / openai / deepseek) 仍是 sk- 前缀。
+        if (id === 'minimaxi') {
+          expect(meta.keyPlaceholder.startsWith('eyJ')).toBe(true);
+        } else {
+          expect(meta.keyPlaceholder.startsWith('sk-')).toBe(true);
+        }
         expect(meta.keyHelpUrl.startsWith('https://')).toBe(true);
         expect(meta.keyHelpLabel.length).toBeGreaterThan(0);
       }

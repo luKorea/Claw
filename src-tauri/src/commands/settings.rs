@@ -26,7 +26,9 @@ fn validate_provider(provider: &str) -> AppResult<()> {
     }
 }
 
-/// 校验 set_api_key 输入:provider 白名单 + trim + 非空 + sk- 前缀。
+/// 校验 set_api_key 输入:provider 白名单 + trim + 非空。
+/// **MiniMax 实际是 JWT 格式(`eyJ...`),不像 Anthropic/OpenAI 是 `sk-` 前缀**。
+/// 通用检查仅 trim + 非空,不再硬要求 `sk-` 前缀(避免 MiniMax 用户配不上)。
 /// 返回 trim 后的 key 字符串(可直接写入 Keychain)。
 /// **公开**给单元测试,业务命令复用同一份校验逻辑。
 pub fn validate_input(provider: &str, api_key: &str) -> AppResult<String> {
@@ -34,9 +36,6 @@ pub fn validate_input(provider: &str, api_key: &str) -> AppResult<String> {
     let trimmed = api_key.trim();
     if trimmed.is_empty() {
         return Err(AppError::InvalidInput("API Key 不能为空".into()));
-    }
-    if !trimmed.starts_with("sk-") {
-        return Err(AppError::InvalidInput("API Key 必须以 sk- 开头".into()));
     }
     Ok(trimmed.to_string())
 }
@@ -223,10 +222,19 @@ mod tests {
     }
 
     #[test]
-    fn validate_input_rejects_non_sk_prefix() {
-        let r = validate_input("openai", "eyJhbGciOi...");
-        assert!(r.is_err());
-        assert!(r.unwrap_err().to_string().contains("sk-"));
+    fn validate_input_accepts_minimaxi_jwt() {
+        // v1.3:MiniMax 实际是 JWT 格式 `eyJ...`,非 `sk-` 前缀。后端不强制 sk-。
+        let r = validate_input("minimaxi", "eyJhbGciOi...");
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), "eyJhbGciOi...");
+    }
+
+    #[test]
+    fn validate_input_accepts_legacy_sk_prefix() {
+        // 兼容:sk- 前缀(Anthropic / OpenAI / 旧 MiniMax 账号)仍接受
+        let r = validate_input("openai", "sk-proj-1234");
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), "sk-proj-1234");
     }
 
     #[test]

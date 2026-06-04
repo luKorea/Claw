@@ -296,8 +296,8 @@ describe('providers/openai-compatible', () => {
     });
     it('minimaxiAdapter 配置正确', () => {
       expect(minimaxiAdapter.id).toBe('minimaxi');
-      // v1.2 Bug 1 强化:MiniMax 官方 chat completions endpoint
-      expect(minimaxiAdapter.baseUrl).toBe('https://api.minimaxi.com/v1');
+      // v1.3:MiniMax 官方主域从 minimaxi.com 切到 minimax.io(401 修正)
+      expect(minimaxiAdapter.baseUrl).toBe('https://api.minimax.io/v1');
     });
   });
 });

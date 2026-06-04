@@ -8,11 +8,14 @@ pub const LISTABLE_PROVIDERS: &[&str] = &["deepseek", "openai", "minimaxi"];
 
 /// 把 provider 映射到 chat completions base URL,**不含** `/v1` 后缀。
 /// 与 `commands::settings::ALL_PROVIDERS` / 各 adapter 保持一致。
+///
+/// v1.3 修正:MiniMax 官方主域名为 api.minimax.io(拼音),api.minimaxi.com 是旧域,
+/// 仍可解析但部分账号会出现 401。前端 adapter 同步改为 .io。
 pub fn base_url_for(provider: &str) -> AppResult<&'static str> {
     match provider {
         "deepseek" => Ok("https://api.deepseek.com"),
         "openai" => Ok("https://api.openai.com/v1"),
-        "minimaxi" => Ok("https://api.minimaxi.com/v1"),
+        "minimaxi" => Ok("https://api.minimax.io/v1"),
         _ => Err(AppError::InvalidInput(format!("未知 provider: {provider}"))),
     }
 }
@@ -117,7 +120,8 @@ mod tests {
     fn base_url_for_returns_known_endpoints() {
         assert_eq!(base_url_for("deepseek").unwrap(), "https://api.deepseek.com");
         assert_eq!(base_url_for("openai").unwrap(), "https://api.openai.com/v1");
-        assert_eq!(base_url_for("minimaxi").unwrap(), "https://api.minimaxi.com/v1");
+        // v1.3:MiniMax 域名从 minimaxi.com 改为 minimax.io(官方主域)
+        assert_eq!(base_url_for("minimaxi").unwrap(), "https://api.minimax.io/v1");
         assert!(base_url_for("anthropic").is_err());
         assert!(base_url_for("xxx").is_err());
     }
