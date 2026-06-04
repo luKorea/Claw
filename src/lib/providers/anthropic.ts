@@ -158,10 +158,34 @@ export class AnthropicAdapter implements ProviderAdapter {
       toolInputAcc: new Map<string, string>(),
     };
 
-    for await (const event of sdkStream) {
-      for (const ev of accumulateSdkEvent(state, event)) {
-        yield ev;
+    try {
+      for await (const event of sdkStream) {
+        for (const ev of accumulateSdkEvent(state, event)) {
+          yield ev;
+        }
       }
+    } catch (err) {
+      // v1.3 修复:Anthropic SDK 抛 APIConnectionError 时 message 永远 "Connection error.",
+      // 真实原因在 `cause`(fetch init 失败的 Error,例如 net::ERR_BLOCKED_BY_CLIENT /
+      // TypeError: Failed to fetch / DNS 解析失败等)。把 cause 拼到 message,
+      // 用户在 UI 看到的 "Connection error" 才有诊断价值。
+      if (err instanceof Anthropic.APIConnectionError) {
+        const cause = (err as { cause?: unknown }).cause;
+        const causeMsg =
+          cause instanceof Error
+            ? cause.message
+            : typeof cause === 'string'
+              ? cause
+              : cause
+                ? String(cause)
+                : '未知网络错误';
+        const enriched = new Error(
+          `${err.message} (${this.opts.providerLabel ?? 'Anthropic'} → ${causeMsg})`,
+        );
+        yield { type: 'error', error: enriched };
+        return;
+      }
+      throw err;
     }
   }
 }
