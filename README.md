@@ -1,14 +1,14 @@
 # Claw
 
-> Claude API 桌面客户端 · Tauri 2 + React 19 + TypeScript
+> 多 Provider AI 桌面客户端 · Tauri 2 + React 19 + TypeScript
 
-一个面向个人使用的 Claude API 桌面聊天客户端，支持多模型切换、思考模式、流式输出、Markdown 渲染、会话历史、系统提示词预设、文件工具。
+一个面向个人使用的多 Provider AI 桌面聊天客户端，支持 Anthropic / DeepSeek / OpenAI / MiniMax、多模型切换、思考模式、流式输出、Markdown 渲染、会话历史、系统提示词预设、文件工具。
 
 ## ✨ 功能
 
-- 🧠 **多模型**：Opus 4.8 / Sonnet 4.6 / Haiku 4.5 实时切换
+- 🧠 **多 Provider / 多模型**：Anthropic / DeepSeek / OpenAI / MiniMax 模型切换
 - 💭 **扩展思考**（Extended Thinking）：可调预算的深度思考
-- ⚡ **流式输出**：基于 Anthropic SDK SSE，逐块渲染
+- ⚡ **流式输出**：基于 Anthropic SDK / OpenAI 兼容 SSE，逐块渲染
 - 📝 **Markdown + 数学公式**：GFM 表格、任务列表、KaTeX 公式
 - 💾 **本地持久化**：SQLite 存会话、消息、提示词预设
 - 🔐 **API Key 安全**：写入操作系统 Keychain（macOS Keychain / Windows Credential Manager / Linux Secret Service）
@@ -22,7 +22,7 @@
 - **前端**：React 19 + TypeScript 5（strict）+ Vite 6
 - **样式**：Tailwind CSS 4 + shadcn/ui
 - **状态**：Zustand 5
-- **数据**：Anthropic SDK + SQLite（sqlx）
+- **数据**：Provider API + SQLite（sqlx）
 - **UI 库**：Radix UI + lucide-react + KaTeX
 
 ## 🚀 快速开始
@@ -38,7 +38,7 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
-首次启动会引导你填写 Anthropic API Key（写入 OS Keychain）。
+首次启动会引导你配置默认模型对应 Provider 的 API Key（写入 OS Keychain）。
 
 ## 📁 项目结构
 
@@ -72,6 +72,29 @@ src-tauri/
 - 实际请求时通过 Tauri command 临时取出，用完即丢。
 - 任何 Tauri 外的进程（包括其他应用）都拿不到明文 Key。
 
+## ✅ 验证
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm test:run
+(cd src-tauri && cargo test --lib)
+pnpm build
+```
+
+真实 Provider 联网冒烟测试需显式执行，会读取当前 Keychain / 环境变量中已配置的 Provider Key，并对每个 Provider 发送一条极短请求：
+
+```bash
+pnpm test:real-providers
+```
+
+- 不会打印 API Key 或 Authorization header。
+- 默认读取 Keychain 服务 `com.claw.client` 下的 `api-key:{provider}`。
+- 读取逻辑复用 Rust `keyring` crate，和 Tauri 后端的 Keychain 规则一致。
+- 也可用 `CLAW_DEEPSEEK_API_KEY` / `CLAW_OPENAI_API_KEY` / `CLAW_ANTHROPIC_API_KEY` / `CLAW_MINIMAXI_API_KEY` 临时覆盖。
+- 可用 `CLAW_SMOKE_PROVIDERS=deepseek,openai` 限定测试 Provider。
+- 未发现任何 Key 时退出码为 `2`；自动化环境可加 `CLAW_SMOKE_ALLOW_EMPTY=1` 将其视为跳过。
+
 ## ⚙️ 系统提示词
 
 内置 4 个预设：
@@ -85,11 +108,11 @@ src-tauri/
 
 ## 🛠️ 工具
 
-| 工具 | 用途 | 范围 |
-| --- | --- | --- |
-| `read_file` | 读取文本文件（≤1MB） | HOME / 桌面 / 文档 / 下载 / 临时 |
-| `list_dir` | 列出目录 | 同上 |
-| `write_file` | 写入文件 | 同上（默认禁用，需手动启用） |
+| 工具         | 用途                 | 范围                             |
+| ------------ | -------------------- | -------------------------------- |
+| `read_file`  | 读取文本文件（≤1MB） | HOME / 桌面 / 文档 / 下载 / 临时 |
+| `list_dir`   | 列出目录             | 同上                             |
+| `write_file` | 写入 / 新建文本文件  | 同上（默认禁用，需手动启用）     |
 
 所有文件操作都限制在白名单目录内，危险操作会标记。
 
@@ -101,6 +124,11 @@ pnpm tauri build
 
 # 仅 macOS universal
 pnpm tauri build --target universal-apple-darwin
+
+# macOS / Linux 交叉编译 Windows NSIS（需先安装 cargo-xwin）
+cargo install cargo-xwin
+rustup target add x86_64-pc-windows-msvc
+pnpm build:tauri:windows:cross
 ```
 
 产物：
@@ -108,6 +136,14 @@ pnpm tauri build --target universal-apple-darwin
 - macOS: `src-tauri/target/release/bundle/dmg/*.dmg` + `.app`
 - Windows: `src-tauri/target/release/bundle/msi/*.msi`
 - Linux: `src-tauri/target/release/bundle/appimage/*.AppImage`
+
+`bundle.targets = "all"` 表示“当前运行系统支持的全部 bundle”，不是一次生成三端产物。Windows 正式安装包推荐用 GitHub Actions 的 `Build Windows` workflow 生成：
+
+- 手动触发：GitHub → Actions → Build Windows → Run workflow
+- 发布触发：推送 `v*` tag，例如 `v0.1.0`
+- 产物：workflow artifact `claw-windows-*`，包含 `.msi` / `.exe`
+
+本机 macOS 交叉编译只能生成 NSIS `.exe`，MSI 仍建议在 Windows runner 上构建。
 
 ## 📝 路线图
 

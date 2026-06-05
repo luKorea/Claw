@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://api.anthropic.com https://api.deepseek.com https://api.openai.com https://api.minimaxi.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self'",
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://api.anthropic.com https://api.deepseek.com https://api.openai.com https://api.minimax.io; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self'",
       "assetProtocol": {
         "enable": true,
         "scope": ["**"]
@@ -40,11 +40,13 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
       "icons/icon.png"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "Claude API Desktop Client",
-    "longDescription": "A desktop client for Claude API with multi-model support, thinking mode, conversation history, and MCP integration.",
+    "shortDescription": "Multi-provider AI Desktop Client",
+    "longDescription": "A desktop AI client for Anthropic, DeepSeek, OpenAI, and MiniMax with thinking mode, conversation history, and local tools.",
     "publisher": "Claw",
     "copyright": "Copyright © 2026"
   }

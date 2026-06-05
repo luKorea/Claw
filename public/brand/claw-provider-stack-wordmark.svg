@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+  <title id="title">Claw Wordmark Concept B - Provider Stack</title>
+  <desc id="desc">Horizontal Claw wordmark with the Provider Stack logo concept.</desc>
+  <defs>
+    <filter id="softShadowBWord" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="15" flood-color="#044AE9" flood-opacity=".15"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="360" fill="#FFFFFF"/>
+  <g transform="translate(56 40) scale(.2734375)">
+    <rect width="1024" height="1024" rx="224" fill="#FFFFFF"/>
+    <rect x="108" y="108" width="808" height="808" rx="184" fill="#F4F8FF"/>
+    <g filter="url(#softShadowBWord)">
+      <path d="M685 236H374C299 236 238 297 238 372V628C238 703 299 764 374 764H685V630H394C372 630 354 612 354 590V410C354 388 372 370 394 370H685V236Z" fill="#044AE9"/>
+      <path d="M740 314H443C401 314 367 348 367 390V430H669C693 430 716 421 734 404L781 360C799 343 787 314 740 314Z" fill="#3D7CFF"/>
+      <path d="M740 590H443C401 590 367 624 367 666V706H669C693 706 716 697 734 680L781 636C799 619 787 590 740 590Z" fill="#78AAFF"/>
+      <rect x="287" y="440" width="146" height="144" rx="42" fill="#FFFFFF" opacity=".92"/>
+    </g>
+  </g>
+  <text x="380" y="223" fill="#0B1220" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="138" font-weight="760" letter-spacing="0">Claw</text>
+  <text x="386" y="278" fill="#44617F" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="34" font-weight="520" letter-spacing="0">unified local workspace for AI models</text>
+</svg>

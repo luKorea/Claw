@@ -8,10 +8,12 @@ import { anthropicAdapter } from '@/lib/providers/anthropic';
 import { deepseekAdapter } from '@/lib/providers/deepseek';
 import { openaiAdapter } from '@/lib/providers/openai';
 import { minimaxiAdapter } from '@/lib/providers/minimaxi';
+import { CustomProviderAdapter } from '@/lib/providers/custom';
+import { getCustomProvider } from '@/stores/customProviders';
 import type { ProviderAdapter } from '@/lib/providers/types';
-import type { ProviderId } from '@/types/providers';
+import { isCustomProviderId, type ProviderId, type StaticProviderId } from '@/types/providers';
 
-export const PROVIDER_ADAPTERS: Record<ProviderId, ProviderAdapter> = {
+export const PROVIDER_ADAPTERS: Record<StaticProviderId, ProviderAdapter> = {
   anthropic: anthropicAdapter,
   deepseek: deepseekAdapter,
   openai: openaiAdapter,
@@ -19,6 +21,13 @@ export const PROVIDER_ADAPTERS: Record<ProviderId, ProviderAdapter> = {
 };
 
 export function selectAdapter(provider: ProviderId): ProviderAdapter {
+  if (isCustomProviderId(provider)) {
+    const customProvider = getCustomProvider(provider);
+    if (!customProvider || !customProvider.enabled) {
+      throw new Error(`自定义模型不存在或已禁用: ${provider}`);
+    }
+    return new CustomProviderAdapter(customProvider);
+  }
   return PROVIDER_ADAPTERS[provider];
 }
 

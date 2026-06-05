@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDownIcon } from 'lucide-react';
+import {
+  ChevronDownIcon,
+  CalendarDaysIcon,
+  LanguagesIcon,
+  PenLineIcon,
+  SparklesIcon,
+} from 'lucide-react';
 
 import { useChatStore } from '@/stores/chat';
+import { useChat } from '@/hooks/useChat';
 
 import { MessageItem } from './MessageItem';
 
@@ -45,7 +52,7 @@ export function MessageList() {
           {isStreaming && messages[messages.length - 1]?.role === 'user' && (
             <div className="flex items-center gap-2 px-6 py-2 text-sm text-muted-foreground">
               <Spinner size="sm" />
-              Claude 正在思考…
+              模型正在思考…
             </div>
           )}
           {error && (
@@ -74,25 +81,49 @@ export function MessageList() {
 }
 
 function EmptyState() {
+  const { send, isStreaming } = useChat();
+  const suggestions = [
+    {
+      icon: PenLineIcon,
+      text: '帮我写一篇产品介绍',
+    },
+    {
+      icon: SparklesIcon,
+      text: '分析这段代码',
+    },
+    {
+      icon: LanguagesIcon,
+      text: '帮我翻译这段文字',
+    },
+    {
+      icon: CalendarDaysIcon,
+      text: '生成一份周报',
+    },
+  ];
+
   return (
-    <div className="flex h-full flex-col items-center justify-center px-6 pt-24 text-center">
-      <div className="mb-4 text-4xl">👋</div>
-      <h2 className="text-xl font-semibold">开始一次新的对话</h2>
+    <div className="flex min-h-[420px] flex-col items-center justify-center px-6 pt-16 text-center">
+      <div className="mb-5 flex size-20 items-center justify-center rounded-md border bg-primary/5 text-primary shadow-sm">
+        <SparklesIcon className="size-9" />
+      </div>
+      <h2 className="text-2xl font-semibold">你好，我是 Claw</h2>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">
-        在下方输入消息，按 <kbd className="rounded border bg-muted px-1.5 py-0.5 text-xs">Enter</kbd> 发送，
-        <kbd className="ml-1 rounded border bg-muted px-1.5 py-0.5 text-xs">Shift+Enter</kbd> 换行。
+        选择一个问题开始，或直接在下方输入你的内容。
       </p>
       <ul className="mt-6 grid w-full max-w-2xl grid-cols-1 gap-2 text-left sm:grid-cols-2">
-        {['用 Python 写个快速排序', '解释一下 Rust 的所有权', '翻译：把这段话译成英文', '总结：什么是 LLM'].map(
-          (q) => (
-            <li
-              key={q}
-              className="rounded-lg border bg-card p-3 text-sm text-card-foreground shadow-xs hover:bg-accent"
+        {suggestions.map(({ icon: Icon, text }) => (
+          <li key={text}>
+            <button
+              type="button"
+              disabled={isStreaming}
+              className="flex h-12 w-full items-center gap-3 rounded-md border bg-card px-3 text-left text-sm text-card-foreground shadow-xs transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => void send({ text })}
             >
-              {q}
-            </li>
-          ),
-        )}
+              <Icon className="size-4 text-primary" />
+              <span className="truncate">{text}</span>
+            </button>
+          </li>
+        ))}
       </ul>
     </div>
   );

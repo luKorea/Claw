@@ -1,5 +1,7 @@
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use crate::error::{AppError, AppResult};
 
@@ -15,19 +17,29 @@ fn account_name(provider: &str) -> String {
     format!("api-key:{provider}")
 }
 
+fn is_custom_provider(provider: &str) -> bool {
+    let Some(id) = provider.strip_prefix("custom:") else {
+        return false;
+    };
+    !id.is_empty()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 fn validate_provider(provider: &str) -> AppResult<()> {
-    if ALL_PROVIDERS.contains(&provider) {
+    if ALL_PROVIDERS.contains(&provider) || is_custom_provider(provider) {
         Ok(())
     } else {
         Err(AppError::InvalidInput(format!(
-            "未知 provider: {provider}。可选: {}",
+            "未知 provider: {provider}。可选: {} 或 custom:<id>",
             ALL_PROVIDERS.join(", ")
         )))
     }
 }
 
 /// 校验 set_api_key 输入:provider 白名单 + trim + 非空。
-/// **MiniMax 实际是 JWT 格式(`eyJ...`),不像 Anthropic/OpenAI 是 `sk-` 前缀**。
+/// MiniMax 目前走 `sk-cp-...` / `sk-` 风格 Key,但不同 Provider 的 Key 格式可能继续变化。
 /// 通用检查仅 trim + 非空,不再硬要求 `sk-` 前缀(避免 MiniMax 用户配不上)。
 /// 返回 trim 后的 key 字符串(可直接写入 Keychain)。
 /// **公开**给单元测试,业务命令复用同一份校验逻辑。
@@ -44,6 +56,76 @@ fn entry(provider: &str) -> AppResult<Entry> {
     Ok(Entry::new(SERVICE, &account_name(provider))?)
 }
 
+#[derive(Default)]
+struct ApiKeyCache {
+    /// 仅保存在当前应用进程内,用于避免同一轮启动反复触发 macOS Keychain 授权弹窗。
+    secrets: HashMap<String, String>,
+    absent: HashSet<String>,
+}
+
+static API_KEY_CACHE: OnceLock<Mutex<ApiKeyCache>> = OnceLock::new();
+
+fn api_key_cache() -> &'static Mutex<ApiKeyCache> {
+    API_KEY_CACHE.get_or_init(|| Mutex::new(ApiKeyCache::default()))
+}
+
+fn lock_cache() -> AppResult<MutexGuard<'static, ApiKeyCache>> {
+    api_key_cache()
+        .lock()
+        .map_err(|_| AppError::Other("API Key cache lock poisoned".into()))
+}
+
+fn remember_secret(cache: &mut ApiKeyCache, provider: &str, secret: String) {
+    cache.absent.remove(provider);
+    cache.secrets.insert(provider.to_string(), secret);
+}
+
+fn remember_absent(cache: &mut ApiKeyCache, provider: &str) {
+    cache.secrets.remove(provider);
+    cache.absent.insert(provider.to_string());
+}
+
+fn read_secret_uncached(provider: &str) -> AppResult<Option<String>> {
+    let entry = entry(provider)?;
+    match entry.get_password() {
+        Ok(secret) => Ok(Some(secret)),
+        Err(keyring::Error::NoEntry) => {
+            // 旧 v1.0 用户:尝试读 LEGACY_ACCOUNT
+            if provider == "anthropic" {
+                if let Ok(legacy) = Entry::new(SERVICE, LEGACY_ACCOUNT) {
+                    if let Ok(legacy_secret) = legacy.get_password() {
+                        return Ok(Some(legacy_secret));
+                    }
+                }
+            }
+            Ok(None)
+        }
+        Err(e) => Err(AppError::Keyring(e)),
+    }
+}
+
+fn get_secret_cached(provider: &str) -> AppResult<Option<String>> {
+    let mut cache = lock_cache()?;
+    if let Some(secret) = cache.secrets.get(provider) {
+        return Ok(Some(secret.clone()));
+    }
+    if cache.absent.contains(provider) {
+        return Ok(None);
+    }
+
+    // 串行化首次 Keychain 读取,避免多个 React hook 同时挂载时并发弹窗。
+    match read_secret_uncached(provider)? {
+        Some(secret) => {
+            remember_secret(&mut cache, provider, secret.clone());
+            Ok(Some(secret))
+        }
+        None => {
+            remember_absent(&mut cache, provider);
+            Ok(None)
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiKeyStatus {
     pub configured: bool,
@@ -58,6 +140,7 @@ fn preview_for(provider: &str, secret: &str) -> String {
     // 与 anthropic / openai / deepseek 都 sk- 前缀对齐。
     match provider {
         "anthropic" | "deepseek" | "openai" | "minimaxi" => format!("sk-…{suffix}"),
+        p if is_custom_provider(p) => format!("…{suffix}"),
         _ => format!("…{suffix}"),
     }
 }
@@ -65,30 +148,15 @@ fn preview_for(provider: &str, secret: &str) -> String {
 #[tauri::command]
 pub async fn get_api_key_status(provider: String) -> AppResult<ApiKeyStatus> {
     validate_provider(&provider)?;
-    let entry = entry(&provider)?;
-    match entry.get_password() {
-        Ok(secret) => Ok(ApiKeyStatus {
+    match get_secret_cached(&provider)? {
+        Some(secret) => Ok(ApiKeyStatus {
             configured: true,
             preview: Some(preview_for(&provider, &secret)),
         }),
-        Err(keyring::Error::NoEntry) => {
-            // 旧 v1.0 用户:尝试读 LEGACY_ACCOUNT
-            if provider == "anthropic" {
-                if let Ok(legacy) = Entry::new(SERVICE, LEGACY_ACCOUNT) {
-                    if let Ok(legacy_secret) = legacy.get_password() {
-                        return Ok(ApiKeyStatus {
-                            configured: true,
-                            preview: Some(preview_for(&provider, &legacy_secret)),
-                        });
-                    }
-                }
-            }
-            Ok(ApiKeyStatus {
-                configured: false,
-                preview: None,
-            })
-        }
-        Err(e) => Err(AppError::Keyring(e)),
+        None => Ok(ApiKeyStatus {
+            configured: false,
+            preview: None,
+        }),
     }
 }
 
@@ -97,6 +165,10 @@ pub async fn set_api_key(provider: String, api_key: String) -> AppResult<()> {
     let trimmed = validate_input(&provider, &api_key)?;
     let entry = entry(&provider)?;
     entry.set_password(&trimmed)?;
+    {
+        let mut cache = lock_cache()?;
+        remember_secret(&mut cache, &provider, trimmed);
+    }
     // 迁移:首次写入新位置时,删除旧 LEGACY_ACCOUNT
     if provider == "anthropic" {
         if let Ok(legacy) = Entry::new(SERVICE, LEGACY_ACCOUNT) {
@@ -111,8 +183,16 @@ pub async fn delete_api_key(provider: String) -> AppResult<()> {
     validate_provider(&provider)?;
     let entry = entry(&provider)?;
     match entry.delete_credential() {
-        Ok(_) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
+        Ok(_) => {
+            let mut cache = lock_cache()?;
+            remember_absent(&mut cache, &provider);
+            Ok(())
+        }
+        Err(keyring::Error::NoEntry) => {
+            let mut cache = lock_cache()?;
+            remember_absent(&mut cache, &provider);
+            Ok(())
+        }
         Err(e) => Err(AppError::Keyring(e)),
     }
 }
@@ -120,21 +200,9 @@ pub async fn delete_api_key(provider: String) -> AppResult<()> {
 #[tauri::command]
 pub async fn get_api_key(provider: String) -> AppResult<String> {
     validate_provider(&provider)?;
-    let entry = entry(&provider)?;
-    match entry.get_password() {
-        Ok(secret) => Ok(secret),
-        Err(keyring::Error::NoEntry) => {
-            // 旧 v1.0 用户的 legacy fallback
-            if provider == "anthropic" {
-                if let Ok(legacy) = Entry::new(SERVICE, LEGACY_ACCOUNT) {
-                    if let Ok(secret) = legacy.get_password() {
-                        return Ok(secret);
-                    }
-                }
-            }
-            Err(AppError::NotFound("API Key 未配置".into()))
-        }
-        Err(other) => Err(AppError::Keyring(other)),
+    match get_secret_cached(&provider)? {
+        Some(secret) => Ok(secret),
+        None => Err(AppError::NotFound("API Key 未配置".into())),
     }
 }
 
@@ -144,17 +212,8 @@ pub async fn get_api_key(provider: String) -> AppResult<String> {
 pub async fn list_configured_providers() -> AppResult<Vec<String>> {
     let mut out = Vec::new();
     for &p in ALL_PROVIDERS {
-        let entry = Entry::new(SERVICE, &account_name(p))?;
-        if entry.get_password().is_ok() {
+        if get_secret_cached(p)?.is_some() {
             out.push(p.to_string());
-            continue;
-        }
-        if p == "anthropic" {
-            if let Ok(legacy) = Entry::new(SERVICE, LEGACY_ACCOUNT) {
-                if legacy.get_password().is_ok() {
-                    out.push(p.to_string());
-                }
-            }
         }
     }
     Ok(out)
@@ -174,6 +233,19 @@ mod tests {
     fn validate_provider_accepts_all_v11() {
         for p in ALL_PROVIDERS {
             assert!(validate_provider(p).is_ok(), "{p} 应被接受");
+        }
+    }
+
+    #[test]
+    fn validate_provider_accepts_custom_provider_ids() {
+        assert!(validate_provider("custom:local_1").is_ok());
+        assert!(validate_provider("custom:anthropic-proxy").is_ok());
+    }
+
+    #[test]
+    fn validate_provider_rejects_malformed_custom_provider_ids() {
+        for p in ["custom:", "custom:../x", "custom:abc/def", "custom:abc def"] {
+            assert!(validate_provider(p).is_err(), "{p} 应被拒绝");
         }
     }
 
@@ -201,6 +273,12 @@ mod tests {
     fn preview_for_unknown_provider_falls_back() {
         let s = preview_for("gemini", "xxxx1234");
         assert_eq!(s, "…1234");
+    }
+
+    #[test]
+    fn preview_for_custom_provider_hides_prefix() {
+        let s = preview_for("custom:local_1", "secret-value-9876");
+        assert_eq!(s, "…9876");
     }
 
     #[test]
@@ -245,5 +323,28 @@ mod tests {
     fn validate_input_rejects_unknown_provider_before_trim() {
         let r = validate_input("gemini", "sk-abc");
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn cache_remember_secret_replaces_absent_marker() {
+        let mut cache = ApiKeyCache::default();
+        remember_absent(&mut cache, "deepseek");
+        remember_secret(&mut cache, "deepseek", "sk-test".to_string());
+
+        assert!(!cache.absent.contains("deepseek"));
+        assert_eq!(
+            cache.secrets.get("deepseek").map(String::as_str),
+            Some("sk-test")
+        );
+    }
+
+    #[test]
+    fn cache_remember_absent_removes_secret() {
+        let mut cache = ApiKeyCache::default();
+        remember_secret(&mut cache, "openai", "sk-test".to_string());
+        remember_absent(&mut cache, "openai");
+
+        assert!(cache.absent.contains("openai"));
+        assert!(!cache.secrets.contains_key("openai"));
     }
 }

@@ -44,7 +44,7 @@ export function ToolsSection() {
       <div>
         <h3 className="text-sm font-medium">内置工具</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          这些工具让 Claude 能读取 / 写入你本机的文件。关闭后模型将不可调用。
+          这些工具让模型能读取 / 写入你本机的文件。关闭后模型将不可调用。
         </p>
       </div>
 

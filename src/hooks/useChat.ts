@@ -13,12 +13,21 @@ import { useCallback, useRef } from 'react';
 import { useChatStore } from '@/stores/chat';
 import { useConversationsStore } from '@/stores/conversations';
 import { useSettingsStore } from '@/stores/settings';
+import {
+  getCustomProvider,
+  listEnabledCustomProviders,
+} from '@/stores/customProviders';
 import { useToolsStore } from '@/stores/tools';
 import { now, uuid } from '@/lib/utils';
-import { getApiKey } from '@/lib/keyring';
+import { getApiKey, listConfiguredProviders } from '@/lib/keyring';
 import { filterEnabled } from '@/lib/tools/builtin';
 import { conversationApi, messageApi } from '@/lib/db';
-import { getModelInfo, getProviderOfModel } from '@/types/providers';
+import {
+  getModelInfo,
+  getProviderOfModel,
+  isCustomProviderId,
+  resolveConfiguredModel,
+} from '@/types/providers';
 import type { ChatMessage, ContentBlock, Usage } from '@/types/claude';
 import {
   runChatTurn,
@@ -48,8 +57,6 @@ export function useChat() {
 
   const abortRef = useRef<AbortController | null>(null);
   const sendingRef = useRef(false);
-  // toolResultsBuffer 闭包到 generator,跨轮复用
-  const toolResultsRef = useRef<ToolResult[]>([]);
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();
@@ -67,9 +74,42 @@ export function useChat() {
 
     // 1. 解析 model / provider / key
     const chatState = useChatStore.getState();
-    const model = opts.model ?? useSettingsStore.getState().defaultModel;
+    let conversationId = useChatStore.getState().conversationId;
+    let conv = useConversationsStore
+      .getState()
+      .list.find((c) => c.id === conversationId) ?? null;
+
+    const settings = useSettingsStore.getState();
+    const configuredProviders = new Set(await listConfiguredProviders());
+    const enabledCustomProviders = listEnabledCustomProviders();
+    if (configuredProviders.size === 0 && enabledCustomProviders.length === 0) {
+      const msg = '请先配置至少一个 Provider API Key';
+      chatState.setError(msg);
+      throw new Error(msg);
+    }
+
+    const preferredModel = opts.model ?? conv?.model ?? settings.defaultModel;
+    const preferredCustomProvider = isCustomProviderId(preferredModel)
+      ? getCustomProvider(preferredModel)
+      : null;
+    const model =
+      preferredCustomProvider?.enabled
+        ? preferredCustomProvider.id
+        : resolveConfiguredModel(preferredModel, configuredProviders) ??
+          enabledCustomProviders[0]?.id ??
+          null;
+    if (!model) {
+      const msg = '请先配置至少一个 Provider API Key';
+      chatState.setError(msg);
+      throw new Error(msg);
+    }
+    if (model !== settings.defaultModel && !opts.model && !conv) {
+      settings.setDefaultModel(model);
+    }
+
     const modelInfo = getModelInfo(model);
-    const provider = modelInfo ? modelInfo.provider : getProviderOfModel(model);
+    const customProvider = isCustomProviderId(model) ? getCustomProvider(model) : null;
+    const provider = customProvider?.id ?? (modelInfo ? modelInfo.provider : getProviderOfModel(model));
     if (!provider) {
       chatState.setError(`未知模型: ${model}`);
       throw new Error(`未知模型: ${model}`);
@@ -85,12 +125,7 @@ export function useChat() {
     }
 
     // 2. 确保有当前会话
-    let conversationId = useChatStore.getState().conversationId;
-    let conv = useConversationsStore
-      .getState()
-      .list.find((c) => c.id === conversationId) ?? null;
     if (!conv) {
-      const settings = useSettingsStore.getState();
       const created = await conversationApi.create({
         title: text.slice(0, 20),
         model,
@@ -105,12 +140,13 @@ export function useChat() {
       conv = created;
     } else if (
       opts.model ||
+      model !== conv.model ||
       opts.system !== undefined ||
       opts.thinkingEnabled !== undefined ||
       opts.thinkingBudget !== undefined
     ) {
       const patch: Parameters<typeof conversationApi.update>[0] = { id: conv.id };
-      if (opts.model) patch.model = opts.model;
+      if (opts.model || model !== conv.model) patch.model = model;
       if (opts.system !== undefined) patch.system_prompt = opts.system;
       if (opts.thinkingEnabled !== undefined) patch.thinking_enabled = opts.thinkingEnabled;
       if (opts.thinkingBudget !== undefined) patch.thinking_budget = opts.thinkingBudget;
@@ -152,14 +188,13 @@ export function useChat() {
     const thinkingBudget =
       opts.thinkingBudget ?? conv.thinking_budget ?? useSettingsStore.getState().defaultThinkingBudget;
     const system = opts.system ?? conv.system_prompt ?? undefined;
-    const supportsThinking = modelInfo?.supportsThinking ?? false;
+    const supportsThinking = customProvider?.supportsThinking ?? modelInfo?.supportsThinking ?? false;
     const thinking =
       thinkingEnabled && supportsThinking ? { budget_tokens: thinkingBudget } : null;
 
     const enabledTools = filterEnabled(useToolsStore.getState().disabled);
     const controller = new AbortController();
     abortRef.current = controller;
-    toolResultsRef.current = [];
 
     // 4. 订阅 event 流
     let lastAssistantId: string | null = null;
@@ -174,7 +209,6 @@ export function useChat() {
         maxTokens: resolveMaxTokens(provider, thinking),
         tools: enabledTools,
         history: () => useChatStore.getState().messages,
-        toolResultsBuffer: toolResultsRef.current,
         nextAssistantId: () => uuid(),
         signal: controller.signal,
       });
@@ -182,8 +216,8 @@ export function useChat() {
       for await (const ev of gen) {
         await handleEngineEvent(ev, {
           onToolResult: (tr) => {
-            toolResultsRef.current.push(tr);
-            // 同时把 tool_result 写进当前 assistant message content
+            // 写进当前 assistant message content,用于 UI 展示和下一轮协议转换:
+            // providers/messages 会把它拆成独立 role=tool,而不是作为 assistant content 发送。
             if (lastAssistantId) {
               useChatStore.getState().appendContentBlock(lastAssistantId, {
                 type: 'tool_result',

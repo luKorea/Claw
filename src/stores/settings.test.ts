@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from '@testing-library/react';
 
 import { applyTheme, isModelKnown, useSettingsStore } from '@/stores/settings';
+import { DEFAULT_THINKING_BUDGET } from '@/types/claude';
 import { DEFAULT_MODEL_ID } from '@/types/providers';
 
 const STORAGE_KEY = 'claw.settings.v2';
@@ -11,12 +12,23 @@ describe('stores/settings', () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.classList.remove('dark', 'light');
+    useSettingsStore.setState({
+      theme: 'light',
+      defaultModel: DEFAULT_MODEL_ID,
+      defaultThinkingEnabled: false,
+      defaultThinkingBudget: DEFAULT_THINKING_BUDGET,
+    });
   });
 
   describe('isModelKnown', () => {
     it('接受 ALL_MODELS 内的 id', () => {
       expect(isModelKnown('claude-opus-4-8')).toBe(true);
       expect(isModelKnown('MiniMax-M2.7')).toBe(true);
+    });
+
+    it('接受可反查 Provider 的动态模型 id', () => {
+      expect(isModelKnown('deepseek-v4-flash')).toBe(true);
+      expect(isModelKnown('deepseek-v4-pro')).toBe(true);
     });
 
     it('拒绝未知 id(不抛错)', () => {
@@ -26,7 +38,11 @@ describe('stores/settings', () => {
   });
 
   describe('persist middleware', () => {
-    it('v2 有值时,rehydrate 后 store 从 localStorage 读取', async () => {
+    it('新安装默认 light', () => {
+      expect(useSettingsStore.getState().theme).toBe('light');
+    });
+
+    it('v2 有值时,rehydrate 后迁移到 v3 并强制 light', async () => {
       localStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({
@@ -49,7 +65,7 @@ describe('stores/settings', () => {
       expect(s.defaultThinkingBudget).toBe(8_000);
     });
 
-    it('v1 → v2 迁移:rehydrate 时读 v1 key 并删 v1', async () => {
+    it('v1 → v3 迁移:rehydrate 时读 v1 key、强制 light 并删 v1', async () => {
       localStorage.setItem(
         LEGACY_KEY,
         JSON.stringify({
@@ -63,6 +79,7 @@ describe('stores/settings', () => {
         await useSettingsStore.persist.rehydrate();
       });
       const s = useSettingsStore.getState();
+      expect(s.theme).toBe('light');
       expect(s.defaultModel).toBe('gpt-5');
       // 迁移后 v1 应被删除
       expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
@@ -73,7 +90,7 @@ describe('stores/settings', () => {
         STORAGE_KEY,
         JSON.stringify({
           state: { defaultModel: 'unknown-model-xyz', theme: 'dark' },
-          version: 2,
+          version: 3,
         }),
       );
       await act(async () => {
@@ -81,12 +98,31 @@ describe('stores/settings', () => {
       });
       expect(useSettingsStore.getState().defaultModel).toBe(DEFAULT_MODEL_ID);
     });
+
+    it('persisted 动态模型 id rehydrate 后保留', async () => {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          state: { defaultModel: 'deepseek-v4-pro', theme: 'light' },
+          version: 3,
+        }),
+      );
+      await act(async () => {
+        await useSettingsStore.persist.rehydrate();
+      });
+      expect(useSettingsStore.getState().defaultModel).toBe('deepseek-v4-pro');
+    });
   });
 
   describe('setters', () => {
     it('setDefaultModel 接受合法 id', () => {
       useSettingsStore.getState().setDefaultModel('claude-sonnet-4-6');
       expect(useSettingsStore.getState().defaultModel).toBe('claude-sonnet-4-6');
+    });
+
+    it('setDefaultModel 接受动态模型 id', () => {
+      useSettingsStore.getState().setDefaultModel('deepseek-v4-flash');
+      expect(useSettingsStore.getState().defaultModel).toBe('deepseek-v4-flash');
     });
 
     it('setDefaultModel 持久化到 localStorage', async () => {

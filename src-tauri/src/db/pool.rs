@@ -37,5 +37,7 @@ pub async fn init(app: &AppHandle) -> AppResult<SqlitePool> {
 }
 
 pub fn pool() -> AppResult<SqlitePool> {
-    POOL.get().cloned().ok_or_else(|| AppError::Other("db pool not ready".into()))
+    POOL.get()
+        .cloned()
+        .ok_or_else(|| AppError::Other("db pool not ready".into()))
 }

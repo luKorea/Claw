@@ -39,6 +39,11 @@ node_modules/.tmp
 .tauri/
 WixTools/
 node_modules
+src-tauri/icons/android/
+src-tauri/icons/ios/
+
+# Local browser test artifacts
+.playwright-mcp/
 
 # Test coverage
 coverage/

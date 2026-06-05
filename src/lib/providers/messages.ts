@@ -38,7 +38,7 @@ export function chatMessageToAdapter(m: ChatMessage): AdapterMessage[] {
     return result;
   }
 
-  // assistant: 把 tool_use 转成 tool_calls
+  // assistant: 把 tool_use 转成 tool_calls,把同条消息里的 tool_result 拆成独立 tool 消息。
   const text = m.content
     .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
     .map((b) => b.text)
@@ -50,11 +50,14 @@ export function chatMessageToAdapter(m: ChatMessage): AdapterMessage[] {
   const toolUses = m.content.filter(
     (b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use',
   );
+  const toolResults = m.content.filter(
+    (b): b is Extract<ContentBlock, { type: 'tool_result' }> => b.type === 'tool_result',
+  );
 
   // thinking 内容只用于流式回显,进 adapter request 时不带(reasoning 走专用 thinking 块)
   void thinking;
 
-  const result: AdapterMessage = {
+  const result: AdapterMessage[] = [{
     role: 'assistant',
     content: text,
     tool_calls: toolUses.map((tu) => ({
@@ -62,9 +65,18 @@ export function chatMessageToAdapter(m: ChatMessage): AdapterMessage[] {
       name: tu.name,
       arguments: tu.input,
     })),
-  };
+  }];
 
-  return [result];
+  for (const tr of toolResults) {
+    result.push({
+      role: 'tool',
+      content: tr.content,
+      tool_call_id: tr.tool_use_id,
+      is_error: tr.is_error,
+    });
+  }
+
+  return result;
 }
 
 /**

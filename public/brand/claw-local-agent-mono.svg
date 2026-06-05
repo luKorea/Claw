@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Claw Mono Mark Concept C - Local Agent</title>
+  <desc id="desc">Single color Local Agent logo concept.</desc>
+  <defs>
+    <mask id="agentCut">
+      <rect width="1024" height="1024" fill="#FFFFFF"/>
+      <path d="M508 419L407 512L508 605" fill="none" stroke="#000000" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M577 604H704" fill="none" stroke="#000000" stroke-width="58" stroke-linecap="round"/>
+      <rect x="641" y="417" width="86" height="86" rx="28" fill="#000000"/>
+    </mask>
+  </defs>
+  <path d="M703 236H391C314 236 252 298 252 375V625C252 702 314 764 391 764H703V632H408C386 632 368 614 368 592V408C368 386 386 368 408 368H703V236Z" fill="#044AE9" mask="url(#agentCut)"/>
+</svg>

@@ -4,8 +4,8 @@ use crate::error::{AppError, AppResult};
 
 /// 支持 /v1/models 列表的 provider(v1.2 Bug 3.2)。
 /// Anthropic 不在列表中 — 它没有公开的 models endpoint,前端走硬编码白名单。
-/// minimaxi 也不在 — MiniMax 走 Anthropic 兼容协议(`/anthropic/v1/messages`,无 /v1/models),
-/// 动态模型列表只能从前端 hardcoded(`MINIMAXI_MODELS`)取。
+/// minimaxi 也不在 — MiniMax 走 Anthropic 兼容协议,本轮仍使用前端 hardcoded
+/// `MINIMAXI_MODELS`,避免在启动阶段多一次 provider 请求。
 pub const LISTABLE_PROVIDERS: &[&str] = &["deepseek", "openai"];
 
 /// 把 provider 映射到 chat completions base URL,**不含** `/v1` 后缀。
@@ -55,10 +55,7 @@ pub fn parse_oai_models_response(body: &str) -> AppResult<Vec<String>> {
 /// 调 provider 的 /v1/models,返回 model id 列表。
 /// 网络失败 / 解析失败 → `AppError::Other`(前端 fallback 硬编码)。
 #[tauri::command]
-pub async fn list_provider_models(
-    provider: String,
-    api_key: String,
-) -> AppResult<Vec<String>> {
+pub async fn list_provider_models(provider: String, api_key: String) -> AppResult<Vec<String>> {
     let base = validate_listable_provider(&provider)?;
     let url = format!("{}/models", base);
     log::info!("[models] GET {}", url);
@@ -119,10 +116,13 @@ mod tests {
 
     #[test]
     fn base_url_for_returns_known_endpoints() {
-        assert_eq!(base_url_for("deepseek").unwrap(), "https://api.deepseek.com");
+        assert_eq!(
+            base_url_for("deepseek").unwrap(),
+            "https://api.deepseek.com"
+        );
         assert_eq!(base_url_for("openai").unwrap(), "https://api.openai.com/v1");
         // minimaxi 不在 base_url_for 范围 — 走 Anthropic 兼容端点,
-        // 模型列表前端 hardcoded (MINIMAXI_MODELS)。
+        // 本轮模型列表仍使用前端 hardcoded (MINIMAXI_MODELS)。
         assert!(base_url_for("minimaxi").is_err());
         assert!(base_url_for("anthropic").is_err());
         assert!(base_url_for("xxx").is_err());

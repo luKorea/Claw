@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-import { ALL_PROVIDER_IDS, type ProviderId } from '@/types/providers';
+import { isStaticProviderId, type ProviderId, type StaticProviderId } from '@/types/providers';
 
 export interface ApiKeyStatus {
   configured: boolean;
@@ -38,12 +38,10 @@ export async function getApiKey(provider: ProviderId): Promise<string> {
 }
 
 /** 启动时调用,列出所有已配置 key 的 provider id(供设置面板显示) */
-export async function listConfiguredProviders(): Promise<ProviderId[]> {
+export async function listConfiguredProviders(): Promise<StaticProviderId[]> {
   const list = await invoke<string[]>('list_configured_providers');
   // 防御性过滤:后端只返回已知 provider,但前端不能完全信任
-  return list.filter((p): p is ProviderId =>
-    ALL_PROVIDER_IDS.includes(p as ProviderId),
-  );
+  return list.filter((p): p is StaticProviderId => isStaticProviderId(p));
 }
 
 /**
@@ -52,7 +50,7 @@ export async function listConfiguredProviders(): Promise<ProviderId[]> {
  * Anthropic / 未知 provider 由 Rust 端拒绝,前端无需判断。
  */
 export async function listProviderModels(
-  provider: ProviderId,
+  provider: StaticProviderId,
   apiKey: string,
 ): Promise<string[]> {
   return invoke<string[]>('list_provider_models', { provider, apiKey });

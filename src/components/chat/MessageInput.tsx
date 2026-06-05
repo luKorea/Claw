@@ -129,7 +129,7 @@ export function MessageInput({ onSend, className }: Props) {
               adjustHeight();
             }}
             onKeyDown={handleKeyDown}
-            placeholder="发消息给 Claude（Enter 发送，Shift+Enter 换行）"
+            placeholder="发消息给模型（Enter 发送，Shift+Enter 换行）"
             rows={1}
             className="min-h-9 flex-1 border-0 bg-transparent px-1 py-1.5 text-sm shadow-none focus-visible:ring-0"
             disabled={isStreaming}
@@ -165,7 +165,7 @@ export function MessageInput({ onSend, className }: Props) {
           )}
         </div>
         <p className="mt-2 text-center text-xs text-muted-foreground">
-          {toast ?? 'Claude 可能会产生错误，请核实重要信息。'}
+          {toast ?? '模型可能会产生错误，请核实重要信息。'}
         </p>
       </div>
     </div>

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Claw Desktop App Icon</title>
+  <desc id="desc">Desktop-safe Command C app icon with macOS-friendly padding.</desc>
+  <defs>
+    <filter id="tileShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#044AE9" flood-opacity=".12"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="none"/>
+  <g filter="url(#tileShadow)">
+    <rect x="96" y="96" width="832" height="832" rx="186" fill="#FFFFFF"/>
+    <rect x="176" y="176" width="672" height="672" rx="150" fill="#F4F8FF"/>
+  </g>
+  <g transform="translate(81.92 81.92) scale(.84)">
+    <path
+      d="M661 275C601 229 525 211 451 225C331 247 235 343 216 466C191 626 300 774 460 801C545 815 630 790 694 735C723 710 748 680 766 646"
+      fill="none"
+      stroke="#044AE9"
+      stroke-width="132"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path d="M685 350L826 511L675 670L638 571L533 535L685 350Z" fill="#044AE9"/>
+    <path d="M690 438L751 512L690 585L676 548L636 532L690 438Z" fill="#FFFFFF" opacity=".94"/>
+  </g>
+</svg>

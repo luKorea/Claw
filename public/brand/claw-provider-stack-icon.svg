@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Claw Logo Concept B - Provider Stack</title>
+  <desc id="desc">Layered blue geometric blocks forming an abstract C for multiple providers.</desc>
+  <defs>
+    <filter id="softShadowB" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="24" stdDeviation="26" flood-color="#044AE9" flood-opacity=".16"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="#FFFFFF"/>
+  <rect x="108" y="108" width="808" height="808" rx="184" fill="#F4F8FF"/>
+  <g filter="url(#softShadowB)">
+    <path d="M685 236H374C299 236 238 297 238 372V628C238 703 299 764 374 764H685V630H394C372 630 354 612 354 590V410C354 388 372 370 394 370H685V236Z" fill="#044AE9"/>
+    <path d="M740 314H443C401 314 367 348 367 390V430H669C693 430 716 421 734 404L781 360C799 343 787 314 740 314Z" fill="#3D7CFF"/>
+    <path d="M740 590H443C401 590 367 624 367 666V706H669C693 706 716 697 734 680L781 636C799 619 787 590 740 590Z" fill="#78AAFF"/>
+    <rect x="287" y="440" width="146" height="144" rx="42" fill="#FFFFFF" opacity=".92"/>
+  </g>
+</svg>

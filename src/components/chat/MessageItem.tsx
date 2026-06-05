@@ -49,10 +49,8 @@ export const MessageItem = memo(function MessageItem({ message }: Props) {
     <div
       data-role={message.role}
       className={cn(
-        // v1.3:user 整行靠左,内容用窄气泡(紧凑);assistant 占满左对齐(宽松)。
-        // 两者都"贴左",但宽度有别 — 短问题跟长回答放一起更协调。
         'group/message flex w-full gap-3 px-4 py-4 sm:px-6',
-        isUser ? 'bg-background' : 'bg-muted/30',
+        isUser ? 'flex-row-reverse bg-background' : 'bg-muted/30',
       )}
     >
       <div
@@ -67,14 +65,18 @@ export const MessageItem = memo(function MessageItem({ message }: Props) {
       <div
         className={cn(
           'min-w-0 space-y-2',
-          // user 内容靠左 + 气泡样式;assistant 占满内容列(由父 max-w-3xl 控宽)
           isUser
-            ? 'max-w-2xl rounded-2xl rounded-tl-sm border bg-muted/40 px-4 py-2.5'
+            ? 'max-w-[80%] rounded-2xl rounded-tr-sm border bg-muted/40 px-4 py-2.5'
             : 'flex-1',
         )}
       >
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-medium">{isUser ? '你' : 'Claude'}</span>
+        <div
+          className={cn(
+            'flex items-center gap-2 text-xs text-muted-foreground',
+            isUser && 'justify-end',
+          )}
+        >
+          <span className="font-medium">{isUser ? '你' : '助手'}</span>
           {message.model && !isUser && (
             <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
               {message.model}

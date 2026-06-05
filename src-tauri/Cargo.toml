@@ -1,10 +1,16 @@
 [package]
 name = "claw-client"
 version = "0.1.0"
-description = "Claude API Desktop Client"
+description = "Multi-provider AI Desktop Client"
 authors = ["you"]
 edition = "2021"
 rust-version = "1.77"
+default-run = "claw-client"
+autobins = false
+
+[[bin]]
+name = "claw-client"
+path = "src/main.rs"
 
 [lib]
 name = "claw_client_lib"

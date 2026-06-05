@@ -16,6 +16,8 @@ export interface AdapterMessage {
   content: string | ContentBlock[];
   /** 工具结果 ID,仅 role === 'tool' 时存在 */
   tool_call_id?: string;
+  /** 工具结果是否为错误,仅 role === 'tool' 时存在 */
+  is_error?: boolean;
   /** 助手发起的工具调用(OAI 风格,Anthropic adapter 内部转 tool_use) */
   tool_calls?: Array<{
     id: string;

@@ -99,6 +99,33 @@ describe('providers/messages', () => {
       ]);
     });
 
+    it('assistant 内 tool_result 拆成紧随其后的 tool 消息', () => {
+      const out = chatMessageToAdapter(
+        asstMsg([
+          { type: 'tool_use', id: 't1', name: 'read_file', input: { path: '/a' } },
+          {
+            type: 'tool_result',
+            tool_use_id: 't1',
+            content: '{"content":"ok"}',
+            is_error: false,
+          },
+        ]),
+      );
+      expect(out).toEqual([
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{ id: 't1', name: 'read_file', arguments: { path: '/a' } }],
+        },
+        {
+          role: 'tool',
+          content: '{"content":"ok"}',
+          tool_call_id: 't1',
+          is_error: false,
+        },
+      ]);
+    });
+
     it('多 text 合并 + tool_use 列表', () => {
       const out = chatMessageToAdapter(
         asstMsg([

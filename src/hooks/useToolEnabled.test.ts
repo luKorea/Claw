@@ -1,19 +1,27 @@
 import { act, renderHook } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { useToolEnabled } from '@/hooks/useToolEnabled';
-import { useToolsStore } from '@/stores/tools';
+import { DEFAULT_DISABLED_TOOLS, useToolsStore } from '@/stores/tools';
 
-afterEach(() => {
+beforeEach(() => {
   act(() => {
-    useToolsStore.setState({ disabled: [] });
+    useToolsStore.setState({ disabled: [...DEFAULT_DISABLED_TOOLS] });
   });
 });
 
 describe('hooks/useToolEnabled', () => {
-  it('默认禁用列表为空 → 工具启用', () => {
+  it('默认 read_file 启用', () => {
     const { result } = renderHook(() => useToolEnabled('read_file'));
     expect(result.current).toBe(true);
+  });
+
+  it('默认 write_file 禁用', () => {
+    act(() => {
+      useToolsStore.setState({ disabled: [...DEFAULT_DISABLED_TOOLS] });
+    });
+    const { result } = renderHook(() => useToolEnabled('write_file'));
+    expect(result.current).toBe(false);
   });
 
   it('setDisabled(name, true) → 该工具视为禁用', () => {

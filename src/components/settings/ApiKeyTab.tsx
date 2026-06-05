@@ -10,8 +10,8 @@ import { CheckCircle2Icon, EyeIcon, EyeOffIcon, Trash2Icon } from 'lucide-react'
 
 import { useSettings } from '@/hooks/useSettings';
 import type { ApiKeyState } from '@/hooks/useSettings';
-import { useModels } from '@/hooks/useModels';
-import { ALL_PROVIDER_IDS, PROVIDERS, type ProviderId } from '@/types/providers';
+import { LISTABLE_PROVIDERS_FRONTEND, useModels } from '@/hooks/useModels';
+import { ALL_PROVIDER_IDS, PROVIDERS, type StaticProviderId } from '@/types/providers';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,7 +38,7 @@ export function ApiKeyTab() {
 }
 
 interface ProviderKeyCardProps {
-  provider: ProviderId;
+  provider: StaticProviderId;
   state: ApiKeyState;
   onSave: (key: string) => Promise<void>;
   onRemove: () => Promise<void>;
@@ -65,7 +65,9 @@ export function ProviderKeyCard({
     try {
       await onSave(input.trim());
       setInput('');
-      void fetchProvider(provider);
+      if (LISTABLE_PROVIDERS_FRONTEND.includes(provider)) {
+        void fetchProvider(provider);
+      }
     } catch {
       // error 在 state 里
     }
@@ -132,7 +134,7 @@ export function ProviderKeyCard({
           >
             {meta.keyHelpLabel}
           </a>{' '}
-          获取。Key 以 <code>{provider === 'minimaxi' ? 'eyJ' : 'sk-'}</code> 开头。
+          获取。Key 以 <code>{provider === 'minimaxi' ? 'sk-cp-' : 'sk-'}</code> 开头。
         </span>
         {state.configured && (
           <Button

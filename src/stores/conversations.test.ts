@@ -67,6 +67,22 @@ describe('stores/conversations', () => {
     });
   });
 
+  describe('patchLocal', () => {
+    it('本地 patch 会返回旧会话并立即更新列表', () => {
+      useConversationsStore.getState().setList([makeConv({ id: 'a', model: 'deepseek-chat' })]);
+      const previous = useConversationsStore
+        .getState()
+        .patchLocal('a', { model: 'MiniMax-M2.7' });
+
+      expect(previous?.model).toBe('deepseek-chat');
+      expect(useConversationsStore.getState().list[0]?.model).toBe('MiniMax-M2.7');
+    });
+
+    it('找不到会话时返回 null', () => {
+      expect(useConversationsStore.getState().patchLocal('missing', { model: 'gpt-4o' })).toBeNull();
+    });
+  });
+
   describe('remove', () => {
     it('删除非当前会话,不动 currentId 也不动 chat', () => {
       useConversationsStore.setState({

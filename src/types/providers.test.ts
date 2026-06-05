@@ -6,9 +6,12 @@ import {
   DEFAULT_MODEL_ID,
   MODEL_REGISTRY,
   PROVIDERS,
+  type StaticProviderId,
+  getFirstModelForProvider,
   getModelInfo,
   getProviderOfModel,
   listModelsByProvider,
+  resolveConfiguredModel,
 } from '@/types/providers';
 
 describe('types/providers', () => {
@@ -29,11 +32,9 @@ describe('types/providers', () => {
       }
     });
 
-    it('minimaxi 帮助链接指向 platform.minimaxi.com(非 minimax.io)', () => {
-      // v1.2 Bug 1 回归保护:MiniMax 官方 platform 域名是 minimaxi.com(拼音),
-      // 旧值 platform.minimax.io 是错的(用户点链接拿不到 key,误以为配置不生效)
-      expect(PROVIDERS.minimaxi.keyHelpUrl).toBe('https://platform.minimaxi.com');
-      expect(PROVIDERS.minimaxi.keyHelpLabel).toBe('platform.minimaxi.com');
+    it('minimaxi 帮助链接指向官方 platform.minimax.io', () => {
+      expect(PROVIDERS.minimaxi.keyHelpUrl).toBe('https://platform.minimax.io');
+      expect(PROVIDERS.minimaxi.keyHelpLabel).toBe('platform.minimax.io');
     });
   });
 
@@ -78,6 +79,8 @@ describe('types/providers', () => {
 
     it('deepseek-* → deepseek', () => {
       expect(getProviderOfModel('deepseek-reasoner')).toBe('deepseek');
+      expect(getProviderOfModel('deepseek-v4-flash')).toBe('deepseek');
+      expect(getProviderOfModel('deepseek-v4-pro')).toBe('deepseek');
     });
 
     it('gpt-* → openai', () => {
@@ -85,6 +88,7 @@ describe('types/providers', () => {
     });
 
     it('MiniMax-* → minimaxi', () => {
+      expect(getProviderOfModel('MiniMax-M3')).toBe('minimaxi');
       expect(getProviderOfModel('MiniMax-M2.7')).toBe('minimaxi');
     });
 
@@ -112,6 +116,32 @@ describe('types/providers', () => {
       // 再次获取,不应包含刚 push 的 fake
       const again = listModelsByProvider();
       expect(again[0]?.models.find((m) => m.id === 'fake')).toBeUndefined();
+    });
+  });
+
+  describe('configured model fallback', () => {
+    it('getFirstModelForProvider 返回 provider 首个模型', () => {
+      expect(getFirstModelForProvider('anthropic')?.id).toBe('claude-opus-4-8');
+      expect(getFirstModelForProvider('minimaxi')?.id).toBe('MiniMax-M2.7');
+    });
+
+    it('preferred 所属 provider 已配置时保留原模型', () => {
+      const configured = new Set<StaticProviderId>(['openai']);
+      expect(resolveConfiguredModel('gpt-4o', configured)).toBe('gpt-4o');
+    });
+
+    it('preferred 是动态 DeepSeek 模型且 deepseek 已配置时保留原模型', () => {
+      const configured = new Set<StaticProviderId>(['deepseek']);
+      expect(resolveConfiguredModel('deepseek-v4-flash', configured)).toBe('deepseek-v4-flash');
+    });
+
+    it('preferred 所属 provider 未配置时回退到首个已配置 provider', () => {
+      const configured = new Set<StaticProviderId>(['anthropic']);
+      expect(resolveConfiguredModel('MiniMax-M2.7', configured)).toBe('claude-opus-4-8');
+    });
+
+    it('无任何已配置 provider 时返回 null', () => {
+      expect(resolveConfiguredModel('MiniMax-M2.7', new Set())).toBeNull();
     });
   });
 

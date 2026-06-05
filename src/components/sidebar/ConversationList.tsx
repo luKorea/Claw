@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import {
+  MessagesSquareIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  Trash2Icon,
+} from 'lucide-react';
 
 import { useConversations } from '@/hooks/useConversations';
 import { useChatStore } from '@/stores/chat';
@@ -52,10 +57,10 @@ function ConversationItem({
   return (
     <div
       className={cn(
-        'group/item relative flex items-center gap-1 rounded-md px-2 py-1.5 text-sm',
+        'group/item relative flex items-center gap-1 rounded-md border px-2 py-1.5 text-sm',
         active
-          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-          : 'hover:bg-sidebar-accent/60',
+          ? 'border-primary/20 bg-sidebar-accent text-sidebar-accent-foreground'
+          : 'border-transparent hover:bg-secondary',
       )}
     >
       {editing ? (
@@ -143,10 +148,12 @@ export function ConversationList() {
 
   if (conv.list.length === 0) {
     return (
-      <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-        还没有会话
-        <br />
-        点击上方"新建"开始
+      <div className="flex flex-1 flex-col items-center justify-center px-4 py-8 text-center text-xs text-muted-foreground">
+        <div className="mb-3 flex size-10 items-center justify-center rounded-md border bg-background">
+          <MessagesSquareIcon className="size-5" />
+        </div>
+        <div className="font-medium text-foreground">暂无对话</div>
+        <div className="mt-1">从新建会话开始</div>
       </div>
     );
   }

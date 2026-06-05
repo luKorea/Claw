@@ -25,6 +25,18 @@ function restoreMessage(m: Message): ChatMessage {
   };
 }
 
+function toLocalConversationPatch(input: UpdateConversationInput): Partial<Conversation> {
+  const patch: Partial<Conversation> = {};
+  if (input.title !== undefined) patch.title = input.title;
+  if (input.model !== undefined) patch.model = input.model;
+  if (input.system_prompt !== undefined) patch.system_prompt = input.system_prompt;
+  if (input.thinking_enabled !== undefined) {
+    patch.thinking_enabled = input.thinking_enabled ? 1 : 0;
+  }
+  if (input.thinking_budget !== undefined) patch.thinking_budget = input.thinking_budget;
+  return patch;
+}
+
 /**
  * 会话操作 hook(v1.3 重构)
  *
@@ -42,6 +54,7 @@ export function useConversations() {
   const currentId = useConversationsStore((s) => s.currentId);
   const loading = useConversationsStore((s) => s.loading);
   const upsertStore = useConversationsStore((s) => s.upsert);
+  const patchLocalStore = useConversationsStore((s) => s.patchLocal);
   const removeStore = useConversationsStore((s) => s.remove);
   const setCurrentStore = useConversationsStore((s) => s.setCurrent);
 
@@ -103,11 +116,17 @@ export function useConversations() {
 
   const update = useCallback(
     async (input: UpdateConversationInput) => {
-      await conversationApi.update(input);
-      const updated = await conversationApi.get(input.id);
-      upsertStore(updated);
+      const previous = patchLocalStore(input.id, toLocalConversationPatch(input));
+      try {
+        await conversationApi.update(input);
+        const updated = await conversationApi.get(input.id);
+        upsertStore(updated);
+      } catch (err) {
+        if (previous) upsertStore(previous);
+        throw err;
+      }
     },
-    [upsertStore],
+    [patchLocalStore, upsertStore],
   );
 
   const remove = useCallback(

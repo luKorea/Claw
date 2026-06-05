@@ -2,20 +2,11 @@ import { useState } from 'react';
 import { BrainIcon } from 'lucide-react';
 
 import { useConversations } from '@/hooks/useConversations';
-import { useGroupedModels } from '@/hooks/useGroupedModels';
+import { getCustomProvider } from '@/stores/customProviders';
 import { useSettingsStore } from '@/stores/settings';
-import { getModelInfo } from '@/types/providers';
+import { getModelInfo, isCustomProviderId } from '@/types/providers';
 import { cn } from '@/lib/utils';
 
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -23,7 +14,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 
 export function ChatHeader() {
   const conv = useConversations();
-  const { grouped: groupedModels } = useGroupedModels();
   const defaultModel = useSettingsStore((s) => s.defaultModel);
   const defaultThinkingEnabled = useSettingsStore((s) => s.defaultThinkingEnabled);
   const defaultThinkingBudget = useSettingsStore((s) => s.defaultThinkingBudget);
@@ -47,7 +37,9 @@ export function ChatHeader() {
     await conv.update(patch);
   };
 
-  const supportsThinking = getModelInfo(model)?.supportsThinking ?? false;
+  const customProvider = isCustomProviderId(model) ? getCustomProvider(model) : null;
+  const supportsThinking =
+    customProvider?.supportsThinking ?? getModelInfo(model)?.supportsThinking ?? false;
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur">
@@ -56,35 +48,6 @@ export function ChatHeader() {
       </div>
 
       <div className="flex items-center gap-2">
-        <Label className="text-xs text-muted-foreground">模型</Label>
-        <Select
-          value={model}
-          onValueChange={async (v) => {
-            await update({ id: current?.id ?? '', model: v });
-          }}
-        >
-          <SelectTrigger className="h-8 w-[200px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(groupedModels).map(([group, models]) => (
-              <SelectGroup key={group}>
-                <SelectLabel>{group}</SelectLabel>
-                {models.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    <span className="flex items-center gap-2">
-                      {m.label}
-                      {m.supportsThinking && (
-                        <span className="text-[10px] text-muted-foreground">thinking</span>
-                      )}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            ))}
-          </SelectContent>
-        </Select>
-
         {supportsThinking && (
           <Tooltip>
             <TooltipTrigger asChild>

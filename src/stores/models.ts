@@ -9,7 +9,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
-import { ALL_PROVIDER_IDS, type ProviderId } from '@/types/providers';
+import { ALL_PROVIDER_IDS, type StaticProviderId } from '@/types/providers';
 
 const STORAGE_KEY = 'claw.models.v1';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -22,7 +22,7 @@ export interface ProviderModelState {
   fetchedAt: number | null;
 }
 
-export type { ProviderId };
+export type { StaticProviderId };
 
 const emptyEntry = (): ProviderModelState => ({
   ids: [],
@@ -31,22 +31,22 @@ const emptyEntry = (): ProviderModelState => ({
   fetchedAt: null,
 });
 
-const initialByProvider = (): Record<ProviderId, ProviderModelState> =>
+const initialByProvider = (): Record<StaticProviderId, ProviderModelState> =>
   Object.fromEntries(ALL_PROVIDER_IDS.map((p) => [p, emptyEntry()])) as Record<
-    ProviderId,
+    StaticProviderId,
     ProviderModelState
   >;
 
 interface ModelsState {
-  byProvider: Record<ProviderId, ProviderModelState>;
+  byProvider: Record<StaticProviderId, ProviderModelState>;
   /** 写 ids 字段(成功路径) */
-  setIds: (provider: ProviderId, ids: string[]) => void;
+  setIds: (provider: StaticProviderId, ids: string[]) => void;
   /** 写 loading 字段 */
-  setLoading: (provider: ProviderId, loading: boolean) => void;
+  setLoading: (provider: StaticProviderId, loading: boolean) => void;
   /** 写 error 字段(失败路径);保留旧 ids */
-  setError: (provider: ProviderId, error: string) => void;
+  setError: (provider: StaticProviderId, error: string) => void;
   /** 重置某个 provider(用于手动 retry) */
-  reset: (provider: ProviderId) => void;
+  reset: (provider: StaticProviderId) => void;
 }
 
 export const useModelsStore = create<ModelsState>()(
@@ -96,7 +96,7 @@ export const useModelsStore = create<ModelsState>()(
       partialize: (s) => ({
         byProvider: Object.fromEntries(
           Object.entries(s.byProvider).map(([k, v]) => [k, { ids: v.ids, fetchedAt: v.fetchedAt }]),
-        ) as Record<ProviderId, ProviderModelState>,
+        ) as Record<StaticProviderId, ProviderModelState>,
       }),
     },
   ),

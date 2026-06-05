@@ -12,7 +12,16 @@ import { useMemo } from 'react';
 
 import { useModels } from '@/hooks/useModels';
 import { useSettings } from '@/hooks/useSettings';
-import { ALL_MODELS, type ModelInfo, type ProviderId } from '@/types/providers';
+import {
+  customProviderToModelInfo,
+  useCustomProvidersStore,
+} from '@/stores/customProviders';
+import {
+  ALL_MODELS,
+  isStaticProviderId,
+  type ModelInfo,
+  type StaticProviderId,
+} from '@/types/providers';
 
 export interface UseGroupedModelsReturn {
   /** 按 groupLabel 聚合后的 model 列表(只含已配 provider)。 */
@@ -22,18 +31,22 @@ export interface UseGroupedModelsReturn {
 export function useGroupedModels(): UseGroupedModelsReturn {
   const { configuredProviders } = useSettings();
   const { mergedByProvider } = useModels();
+  const customProviders = useCustomProvidersStore((s) => s.providers);
 
   return useMemo<UseGroupedModelsReturn>(() => {
     // 1. 硬编码模型:按 groupLabel 聚合,只保留已配 provider
     const grouped: Record<string, ModelInfo[]> = ALL_MODELS.filter(
-      (m) => configuredProviders.has(m.provider),
+      (m) => isStaticProviderId(m.provider) && configuredProviders.has(m.provider),
     ).reduce<Record<string, ModelInfo[]>>((acc, m) => {
       (acc[m.groupLabel] ??= []).push(m);
       return acc;
     }, {});
 
     // 2. 动态拉取的 id(可能不在 ALL_MODELS 里):归到同 provider 的 group
-    for (const [p, ids] of Object.entries(mergedByProvider) as [ProviderId, string[]][]) {
+    for (const [p, ids] of Object.entries(mergedByProvider) as [
+      StaticProviderId,
+      string[],
+    ][]) {
       if (!configuredProviders.has(p)) continue;
       for (const id of ids) {
         // isModelKnown 已包含硬编码;这里只看动态 + 已在硬编码里的去重
@@ -56,6 +69,13 @@ export function useGroupedModels(): UseGroupedModelsReturn {
       }
     }
 
+    const customModels = customProviders
+      .filter((provider) => provider.enabled)
+      .map(customProviderToModelInfo);
+    if (customModels.length > 0) {
+      grouped['自定义'] = [...(grouped['自定义'] ?? []), ...customModels];
+    }
+
     return { grouped };
-  }, [configuredProviders, mergedByProvider]);
+  }, [configuredProviders, customProviders, mergedByProvider]);
 }

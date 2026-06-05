@@ -151,14 +151,12 @@ pub async fn update_conversation(input: UpdateConversation) -> AppResult<()> {
             .await?;
     }
     if let Some(system_prompt) = input.system_prompt {
-        sqlx::query(
-            "UPDATE conversations SET system_prompt = ?1, updated_at = ?2 WHERE id = ?3",
-        )
-        .bind(system_prompt)
-        .bind(now)
-        .bind(&input.id)
-        .execute(&pool)
-        .await?;
+        sqlx::query("UPDATE conversations SET system_prompt = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(system_prompt)
+            .bind(now)
+            .bind(&input.id)
+            .execute(&pool)
+            .await?;
     }
     if let Some(thinking_enabled) = input.thinking_enabled {
         let v = if thinking_enabled { 1 } else { 0 };
@@ -172,14 +170,12 @@ pub async fn update_conversation(input: UpdateConversation) -> AppResult<()> {
         .await?;
     }
     if let Some(thinking_budget) = input.thinking_budget {
-        sqlx::query(
-            "UPDATE conversations SET thinking_budget = ?1, updated_at = ?2 WHERE id = ?3",
-        )
-        .bind(thinking_budget)
-        .bind(now)
-        .bind(&input.id)
-        .execute(&pool)
-        .await?;
+        sqlx::query("UPDATE conversations SET thinking_budget = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(thinking_budget)
+            .bind(now)
+            .bind(&input.id)
+            .execute(&pool)
+            .await?;
     }
 
     Ok(())

@@ -11,6 +11,7 @@ export interface ConversationsState {
   setList: (list: Conversation[]) => void;
   setCurrent: (id: string | null) => void;
   upsert: (conv: Conversation) => void;
+  patchLocal: (id: string, patch: Partial<Conversation>) => Conversation | null;
   remove: (id: string) => void;
   setLoading: (loading: boolean) => void;
 }
@@ -50,6 +51,16 @@ export const useConversationsStore = create<ConversationsState>((set, get) => ({
       }
       return { list: sortByUpdatedAtDesc(next) };
     }),
+  patchLocal: (id, patch) => {
+    const previous = get().list.find((c) => c.id === id) ?? null;
+    if (!previous) return null;
+    set((s) => ({
+      list: sortByUpdatedAtDesc(
+        s.list.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      ),
+    }));
+    return previous;
+  },
   remove: (id) => {
     const wasCurrent = get().currentId === id;
     set((s) => ({

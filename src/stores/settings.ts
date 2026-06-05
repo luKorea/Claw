@@ -4,6 +4,8 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import {
   ALL_MODELS,
   DEFAULT_MODEL_ID,
+  getProviderOfModel,
+  isCustomProviderId,
   type ModelInfo,
 } from '@/types/providers';
 import { DEFAULT_THINKING_BUDGET } from '@/types/claude';
@@ -22,7 +24,7 @@ export interface SettingsState {
   setDefaultThinkingBudget: (budget: number) => void;
 }
 
-// v2 存储键:defaultModel 现在跨 provider
+// 沿用 v2 存储 key,通过 persist version 做 v3 迁移,避免丢失已有设置。
 const STORAGE_KEY = 'claw.settings.v2';
 const LEGACY_KEY = 'claw.settings.v1';
 
@@ -34,7 +36,9 @@ interface Persisted {
 }
 
 function isModelKnown(id: string): boolean {
-  return ALL_MODELS.some((m) => m.id === id);
+  if (isCustomProviderId(id)) return true;
+  if (ALL_MODELS.some((m) => m.id === id)) return true;
+  return getProviderOfModel(id) !== null;
 }
 
 /** v1 → v2 迁移:从旧 key 读出后写回新 key(若 v2 缺,补一次) */
@@ -42,8 +46,8 @@ function migrate(persistedState: unknown, _version: number): Partial<Persisted> 
   void _version;
   if (!persistedState || typeof persistedState !== 'object') return {};
   const s = persistedState as Partial<Persisted>;
-  // 旧的 v1 数据若 defaultModel 仍合法,保留;否则交给 onRehydrateStorage fallback
-  return s;
+  // v3:用户要求已有安装也默认切到浅色;仅迁移时强制 light,后续用户手动切换仍可持久化。
+  return { ...s, theme: 'light' };
 }
 
 /** 选取一个合法的 defaultModel(persisted 值优先,fallback 到 DEFAULT_MODEL_ID) */
@@ -55,7 +59,7 @@ function resolveDefaultModel(persistedModel: string | undefined): string {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      theme: 'dark',
+      theme: 'light',
       defaultModel: DEFAULT_MODEL_ID,
       defaultThinkingEnabled: false,
       defaultThinkingBudget: DEFAULT_THINKING_BUDGET,
@@ -72,7 +76,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: STORAGE_KEY,
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => localStorage),
       migrate,
       // v1 → v2 兼容:旧 key 读一次后立刻写回 v2 并删 v1
@@ -89,7 +93,7 @@ export const useSettingsStore = create<SettingsState>()(
             if (parsed.defaultModel && isModelKnown(parsed.defaultModel)) {
               state.defaultModel = parsed.defaultModel;
             }
-            if (parsed.theme) state.theme = parsed.theme;
+            state.theme = 'light';
             if (typeof parsed.defaultThinkingEnabled === 'boolean') {
               state.defaultThinkingEnabled = parsed.defaultThinkingEnabled;
             }

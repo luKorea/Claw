@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Claw Mono Mark Concept A - Command C</title>
+  <desc id="desc">Single color Command C logo concept.</desc>
+  <path
+    d="M661 275C601 229 525 211 451 225C331 247 235 343 216 466C191 626 300 774 460 801C545 815 630 790 694 735C723 710 748 680 766 646"
+    fill="none"
+    stroke="#044AE9"
+    stroke-width="132"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path d="M685 350L826 511L675 670L638 571L533 535L685 350Z" fill="#044AE9"/>
+</svg>

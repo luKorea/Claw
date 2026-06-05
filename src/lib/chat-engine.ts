@@ -54,12 +54,6 @@ export interface ChatTurnContext {
   tools: ToolDefinition[];
   /** 拉取最新历史消息的闭包。引擎每轮都会调,绕闭包陷阱。 */
   history: () => ChatMessage[];
-  /** 当前累积的 tool_result 缓冲(由 useChat 维护,引擎读) */
-  toolResultsBuffer: ReadonlyArray<{
-    tool_use_id: string;
-    content: string;
-    is_error: boolean;
-  }>;
   /** 注入 tool_result 时使用的临时 assistant 消息 id 工厂 */
   nextAssistantId: () => string;
   signal: AbortSignal;
@@ -104,17 +98,9 @@ export async function* runChatTurn(
     // 历史消息 = store 最新 messages(过滤掉当前正在累积的 assistant 占位)
     const historyMessages = ctx.history().filter((m) => m.id !== messageId);
 
-    // 拼 adapter 消息
+    // 拼 adapter 消息。tool_result 由 providers/messages 从历史 assistant content
+    // 拆成独立 role=tool,保持 assistant(tool_use) -> tool(tool_result) 顺序。
     const messages = buildAdapterMessages(historyMessages, ctx.system);
-
-    // 注入 tool_result(基于 contentBlock 形式)
-    for (const tr of ctx.toolResultsBuffer) {
-      messages.push({
-        role: 'tool',
-        content: tr.content,
-        tool_call_id: tr.tool_use_id,
-      });
-    }
 
     // 过滤空 assistant(无 text / tool_calls 的)
     const cleanMessages = messages.filter(
@@ -138,6 +124,7 @@ export async function* runChatTurn(
 
     const collected: ContentBlock[] = [];
     let usage: Usage | null = null;
+    let streamDone = false;
 
     /**
      * 直接遍历 adapter stream,绕过 consumeStream 的合并:
@@ -206,6 +193,7 @@ export async function* runChatTurn(
           }
           case 'done': {
             void ev.stopReason;
+            streamDone = true;
             break;
           }
           case 'error': {
@@ -217,6 +205,7 @@ export async function* runChatTurn(
             return;
           }
         }
+        if (streamDone) break;
       }
     } catch (err) {
       if (ctx.signal.aborted) {
@@ -261,8 +250,8 @@ export async function* runChatTurn(
         };
       }
     }
-    // 工具结果由 useChat 收集到 toolResultsBuffer,下一轮 round=2 时 history 注入
-    // 因为 history() 是闭包,store 里的 messages 已被 useChat 同步追加 tool_result block
+    // 工具结果由 useChat 同步追加到对应 assistant message 的 tool_result block,
+    // 下一轮 history() 会读到最新状态并由 providers/messages 转为 role=tool。
   }
 
   yield { type: 'final_done', totalTurns: round, lastUsage };

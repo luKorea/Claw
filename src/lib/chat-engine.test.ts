@@ -31,7 +31,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runChatTurn, serializeAssistantContent, resolveMaxTokens } from '@/lib/chat-engine';
 import * as providers from '@/lib/providers';
 import * as executor from '@/lib/tools/executor';
-import type { ProviderAdapter, AdapterEvent } from '@/lib/providers/types';
+import type { ProviderAdapter, AdapterEvent, AdapterRequest } from '@/lib/providers/types';
 import type { ChatMessage, ContentBlock } from '@/types/claude';
 import type { ProviderId } from '@/types/providers';
 
@@ -65,7 +65,6 @@ function makeCtx(
     maxTokens: 8192,
     tools: [],
     history: () => [],
-    toolResultsBuffer: [],
     nextAssistantId: () => `asst-${++counter}`,
     signal: new AbortController().signal,
     ...overrides,
@@ -117,6 +116,28 @@ describe('lib/chat-engine', () => {
     expect(final.totalTurns).toBe(1);
   });
 
+  it('收到 done 后立即结束当前 provider stream,不等待后续事件', async () => {
+    const adapter = makeAdapter([
+      { type: 'text_delta', text: 'hello' },
+      { type: 'done', stopReason: 'end_turn' },
+      { type: 'text_delta', text: ' tail' },
+    ]);
+    mockedSelectAdapter.mockReturnValue(adapter);
+
+    const events = await collect(runChatTurn(makeCtx(adapter)));
+
+    const textDeltas = events
+      .filter((e) => (e as { type: string }).type === 'text_delta')
+      .map((e) => (e as { type: 'text_delta'; text: string }).text);
+    expect(textDeltas).toEqual(['hello']);
+    expect(events.map((e) => (e as { type: string }).type)).toEqual([
+      'turn_start',
+      'text_delta',
+      'turn_done',
+      'final_done',
+    ]);
+  });
+
   it('单轮:有 tool_use → tool_executing → tool_result → 再流式 → final_done', async () => {
     const round1: AdapterEvent[] = [
       { type: 'text_delta', text: '我先查一下' },
@@ -149,7 +170,6 @@ describe('lib/chat-engine', () => {
       runChatTurn(
         makeCtx(adapter, {
           history: () => [],
-          toolResultsBuffer: [],
         }),
       ),
     );
@@ -182,8 +202,9 @@ describe('lib/chat-engine', () => {
     expect(final.totalTurns).toBe(2);
   });
 
-  it('history() 闭包调用:每轮都拉最新,反映 tool_result 注入后状态', async () => {
+  it('history() 闭包调用:每轮都拉最新,第二轮请求保持 assistant tool_use → tool_result 顺序', async () => {
     const calls: ChatMessage[][] = [];
+    const requests: AdapterRequest[] = [];
     const round1: AdapterEvent[] = [
       { type: 'tool_use_start', id: 't1', name: 'list_dir' },
       { type: 'tool_use_end', id: 't1', input: { path: '/tmp' } },
@@ -200,7 +221,8 @@ describe('lib/chat-engine', () => {
       capabilities: { thinking: true, tools: true, system: true },
       validateKey: () => ({ ok: true }),
       previewKey: () => '',
-      async *stream() {
+      async *stream(req: AdapterRequest) {
+        requests.push(req);
         const events = callIdx++ === 0 ? round1 : round2;
         for (const e of events) yield e;
       },
@@ -246,8 +268,19 @@ describe('lib/chat-engine', () => {
     await collect(gen);
 
     expect(calls.length).toBeGreaterThanOrEqual(2);
-    // 第 2 次调用时,history 已包含 tool_result block
+    // 第 2 次调用时,history 已包含 tool_result block。
     expect(calls[1]!.some((m) => m.content.some((b) => b.type === 'tool_result'))).toBe(true);
+    expect(requests[1]?.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool']);
+    expect(requests[1]?.messages[1]).toMatchObject({
+      role: 'assistant',
+      tool_calls: [{ id: 't1', name: 'list_dir', arguments: { path: '/tmp' } }],
+    });
+    expect(requests[1]?.messages[2]).toEqual({
+      role: 'tool',
+      content: '[]',
+      tool_call_id: 't1',
+      is_error: false,
+    });
   });
 
   it('流式 error 事件 → yield error(recoverable=true)', async () => {

@@ -1,10 +1,25 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+export const DEFAULT_DISABLED_TOOLS = ['write_file'] as const;
+const STORAGE_VERSION = 2;
+
 export interface ToolsState {
   /** 用户禁用的工具名集合 */
   disabled: string[];
   setDisabled: (name: string, disabled: boolean) => void;
+}
+
+interface PersistedToolsState {
+  disabled?: unknown;
+}
+
+function withDefaultDisabled(disabled: readonly string[]): string[] {
+  const next = new Set(disabled);
+  for (const name of DEFAULT_DISABLED_TOOLS) {
+    next.add(name);
+  }
+  return Array.from(next);
 }
 
 // v1.3:删 `isEnabled(name)` 内部函数,改用 `useToolEnabled(name)` selector hook
@@ -13,7 +28,7 @@ export interface ToolsState {
 export const useToolsStore = create<ToolsState>()(
   persist(
     (set) => ({
-      disabled: [],
+      disabled: [...DEFAULT_DISABLED_TOOLS],
 
       setDisabled: (name, disabled) =>
         set((s) => {
@@ -25,6 +40,17 @@ export const useToolsStore = create<ToolsState>()(
     }),
     {
       name: 'claw.tools.v1',
+      version: STORAGE_VERSION,
+      migrate: (persistedState, version) => {
+        const state = (persistedState ?? {}) as PersistedToolsState;
+        const disabled = Array.isArray(state.disabled)
+          ? state.disabled.filter((name): name is string => typeof name === 'string')
+          : [];
+
+        return {
+          disabled: version < STORAGE_VERSION ? withDefaultDisabled(disabled) : disabled,
+        };
+      },
       partialize: (s) => ({ disabled: s.disabled }),
     },
   ),

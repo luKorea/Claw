@@ -45,7 +45,7 @@ export function toAnthropicMessages(msgs: AdapterRequest['messages']): Anthropic
         type: 'tool_result',
         tool_use_id: m.tool_call_id,
         content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-        is_error: false,
+        is_error: m.is_error ?? false,
       };
       const last = out[out.length - 1];
       if (last && last.role === 'user' && Array.isArray(last.content)) {
@@ -84,7 +84,7 @@ export interface AnthropicAdapterOptions {
   /**
    * 覆盖 SDK baseURL。
    * - Anthropic 官方:`https://api.anthropic.com`(SDK 默认)
-   * - MiniMax Anthropic 兼容:`https://api.minimaxi.com/anthropic`(端点 `/anthropic/v1/messages`)
+   * - MiniMax Anthropic 兼容:`https://api.minimax.io/anthropic`(端点 `/anthropic/v1/messages`)
    *
    * SDK 会自动在 baseURL 后拼 `/v1/messages`,所以要包含 path 前缀。
    */

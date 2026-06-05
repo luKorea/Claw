@@ -97,7 +97,7 @@ interface OAIChunk {
   };
 }
 
-function toOAIMessages(msgs: AdapterMessage[]): OAIMessage[] {
+export function toOAIMessages(msgs: AdapterMessage[]): OAIMessage[] {
   return msgs.map((m) => {
     if (m.role === 'tool') {
       return {

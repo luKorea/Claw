@@ -18,30 +18,30 @@ import { CACHE_TTL_MS, useModelsStore } from '@/stores/models';
 import {
   ALL_MODELS,
   MODEL_REGISTRY,
-  type ProviderId,
+  type StaticProviderId,
 } from '@/types/providers';
 
 export interface UseModelsReturn {
-  ids: (provider: ProviderId) => string[];
-  loading: (provider: ProviderId) => boolean;
-  error: (provider: ProviderId) => string | null;
-  fetchProvider: (provider: ProviderId) => Promise<void>;
+  ids: (provider: StaticProviderId) => string[];
+  loading: (provider: StaticProviderId) => boolean;
+  error: (provider: StaticProviderId) => string | null;
+  fetchProvider: (provider: StaticProviderId) => Promise<void>;
   /** 清空错误状态 + 重新拉取(失败后用户可手动重试) */
-  retry: (provider: ProviderId) => Promise<void>;
+  retry: (provider: StaticProviderId) => Promise<void>;
   /** 只清错误状态,保留旧 ids(用于 UI 隐藏错误条) */
-  clearError: (provider: ProviderId) => void;
-  isModelKnown: (id: string, provider: ProviderId) => boolean;
+  clearError: (provider: StaticProviderId) => void;
+  isModelKnown: (id: string, provider: StaticProviderId) => boolean;
   /** 合并(硬编码 + 动态)后,按 provider 分组的 model 列表(去重)。fallback 到 ALL_MODELS。 */
-  mergedByProvider: Record<ProviderId, string[]>;
+  mergedByProvider: Record<StaticProviderId, string[]>;
 }
 
 /**
  * 前端可调用 `fetchProvider` 的 provider 列表 — 与 Rust `LISTABLE_PROVIDERS` 对齐。
- * minimaxi 走 Anthropic 兼容协议,没有 /v1/models 端点,前端走 hardcoded 白名单,
- * 自动跳过动态拉取(避免 401 错误条)。
+ * minimaxi 走 Rust Anthropic 兼容桥接,本轮前端走 hardcoded 白名单,
+ * 自动跳过动态拉取(避免启动阶段额外 provider 请求)。
  * v1.3:minimaxi 从这里移出。
  */
-export const LISTABLE_PROVIDERS_FRONTEND: readonly ProviderId[] = ['deepseek', 'openai'];
+export const LISTABLE_PROVIDERS_FRONTEND: readonly StaticProviderId[] = ['deepseek', 'openai'];
 
 export function useModels(): UseModelsReturn {
   const byProvider = useModelsStore((s) => s.byProvider);
@@ -51,15 +51,15 @@ export function useModels(): UseModelsReturn {
   const resetStore = useModelsStore((s) => s.reset);
 
   const ids = useCallback(
-    (provider: ProviderId) => byProvider[provider].ids,
+    (provider: StaticProviderId) => byProvider[provider].ids,
     [byProvider],
   );
   const loading = useCallback(
-    (provider: ProviderId) => byProvider[provider].loading,
+    (provider: StaticProviderId) => byProvider[provider].loading,
     [byProvider],
   );
   const error = useCallback(
-    (provider: ProviderId) => {
+    (provider: StaticProviderId) => {
       // v1.3:空串归一化为 null(setError('', ...) 是 clearError 语义)
       const e = byProvider[provider].error;
       return e === '' ? null : e;
@@ -68,7 +68,7 @@ export function useModels(): UseModelsReturn {
   );
 
   const fetchProvider = useCallback(
-    async (provider: ProviderId) => {
+    async (provider: StaticProviderId) => {
       // 缓存命中:fetchedAt 在 TTL 内且 ids 非空 → 跳过
       const cur = useModelsStore.getState().byProvider[provider];
       if (
@@ -94,7 +94,7 @@ export function useModels(): UseModelsReturn {
   );
 
   const retry = useCallback(
-    async (provider: ProviderId) => {
+    async (provider: StaticProviderId) => {
       // 重置整个 provider 状态(loading/error/ids/fetchedAt 全清),让下次 fetch 重新走
       resetStore(provider);
       await fetchProvider(provider);
@@ -103,14 +103,14 @@ export function useModels(): UseModelsReturn {
   );
 
   const clearError = useCallback(
-    (provider: ProviderId) => {
+    (provider: StaticProviderId) => {
       setError(provider, '');
     },
     [setError],
   );
 
   const isModelKnown = useCallback(
-    (id: string, provider: ProviderId) => {
+    (id: string, provider: StaticProviderId) => {
       // 硬编码白名单
       if (ALL_MODELS.some((m) => m.id === id && m.provider === provider)) return true;
       // 动态拉取缓存
@@ -121,9 +121,9 @@ export function useModels(): UseModelsReturn {
   );
 
   // v1.3:从 useCallback 函数改 useMemo 数据,消费方按字段读
-  const mergedByProvider = useMemo<Record<ProviderId, string[]>>(() => {
-    const result = {} as Record<ProviderId, string[]>;
-    for (const p of Object.keys(byProvider) as ProviderId[]) {
+  const mergedByProvider = useMemo<Record<StaticProviderId, string[]>>(() => {
+    const result = {} as Record<StaticProviderId, string[]>;
+    for (const p of Object.keys(byProvider) as StaticProviderId[]) {
       const hardcoded = MODEL_REGISTRY[p].map((m) => m.id);
       const dynamic = byProvider[p].ids;
       // 动态优先(用户更可能用),去重

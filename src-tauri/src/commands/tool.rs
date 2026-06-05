@@ -17,6 +17,10 @@ pub(crate) fn safe_resolve_with(path: &str, allowed_roots: &[PathBuf]) -> AppRes
         .canonicalize()
         .map_err(|e| AppError::InvalidInput(format!("路径无效: {e}")))?;
 
+    ensure_allowed(canonical, allowed_roots)
+}
+
+fn ensure_allowed(canonical: PathBuf, allowed_roots: &[PathBuf]) -> AppResult<PathBuf> {
     for root in allowed_roots {
         let canonical_root = root.canonicalize().unwrap_or_else(|_| root.clone());
         if canonical.starts_with(&canonical_root) {
@@ -30,10 +34,51 @@ pub(crate) fn safe_resolve_with(path: &str, allowed_roots: &[PathBuf]) -> AppRes
     )))
 }
 
+fn has_parent_dir(path: &Path) -> bool {
+    path.components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
+/// 写入路径解析:
+/// - 已存在文件:canonicalize 文件本身,防止 symlink 指向白名单外。
+/// - 新文件:要求绝对路径且不含 `..`,校验最近已存在父级落在白名单内。
+pub(crate) fn safe_resolve_for_write_with(
+    path: &str,
+    allowed_roots: &[PathBuf],
+) -> AppResult<PathBuf> {
+    let p = Path::new(path);
+    if !p.is_absolute() {
+        return Err(AppError::InvalidInput("写入路径必须是绝对路径".into()));
+    }
+    if has_parent_dir(p) {
+        return Err(AppError::InvalidInput("写入路径不能包含 ..".into()));
+    }
+
+    if let Ok(canonical) = p.canonicalize() {
+        return ensure_allowed(canonical, allowed_roots);
+    }
+
+    let parent = p
+        .parent()
+        .ok_or_else(|| AppError::InvalidInput("写入路径缺少父目录".into()))?;
+    let mut existing = parent;
+    while !existing.exists() {
+        existing = existing
+            .parent()
+            .ok_or_else(|| AppError::InvalidInput("写入路径缺少有效父目录".into()))?;
+    }
+    let canonical_existing = existing
+        .canonicalize()
+        .map_err(|e| AppError::InvalidInput(format!("父目录无效: {e}")))?;
+    ensure_allowed(canonical_existing, allowed_roots)?;
+
+    Ok(p.to_path_buf())
+}
+
 /// 工具执行时允许访问的根目录白名单。
 /// 优先取用户在设置中选定的目录；否则仅允许 $HOME / $DESKTOP / $DOCUMENT / $DOWNLOAD / $TEMP
-fn safe_resolve(path: &str) -> AppResult<PathBuf> {
-    let allowed_roots: Vec<PathBuf> = [
+fn allowed_roots() -> Vec<PathBuf> {
+    [
         dirs::home_dir(),
         dirs::desktop_dir(),
         dirs::document_dir(),
@@ -42,9 +87,15 @@ fn safe_resolve(path: &str) -> AppResult<PathBuf> {
     ]
     .into_iter()
     .flatten()
-    .collect();
+    .collect()
+}
 
-    safe_resolve_with(path, &allowed_roots)
+fn safe_resolve(path: &str) -> AppResult<PathBuf> {
+    safe_resolve_with(path, &allowed_roots())
+}
+
+fn safe_resolve_for_write(path: &str) -> AppResult<PathBuf> {
+    safe_resolve_for_write_with(path, &allowed_roots())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -131,7 +182,7 @@ pub struct WriteFileResult {
 
 #[tauri::command]
 pub async fn write_text_file(path: String, content: String) -> AppResult<WriteFileResult> {
-    let p = safe_resolve(&path)?;
+    let p = safe_resolve_for_write(&path)?;
     if let Some(parent) = p.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -152,7 +203,11 @@ pub async fn pick_directory(app: AppHandle) -> AppResult<Option<String>> {
     let result = rx
         .await
         .map_err(|e| AppError::Other(format!("dialog channel: {e}")))?;
-    Ok(result.and_then(|p| p.into_path().ok().map(|pb| pb.to_string_lossy().to_string())))
+    Ok(result.and_then(|p| {
+        p.into_path()
+            .ok()
+            .map(|pb| pb.to_string_lossy().to_string())
+    }))
 }
 
 #[cfg(test)]
@@ -204,7 +259,10 @@ mod tests {
         let r = safe_resolve_with(ghost.to_str().unwrap(), &roots(&dir));
         assert!(r.is_err());
         let msg = r.unwrap_err().to_string();
-        assert!(msg.contains("路径无效"), "路径不存在应给出 invalid input: {msg}");
+        assert!(
+            msg.contains("路径无效"),
+            "路径不存在应给出 invalid input: {msg}"
+        );
     }
 
     #[test]
@@ -280,6 +338,70 @@ mod tests {
         let dir = tempdir().unwrap();
         let r = safe_resolve_with(dir.path().to_str().unwrap(), &roots(&dir));
         assert!(r.is_ok());
+    }
+
+    #[test]
+    fn safe_resolve_for_write_accepts_existing_file_inside_allowed_root() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("existing.txt");
+        fs::write(&file, "old").unwrap();
+        let r = safe_resolve_for_write_with(file.to_str().unwrap(), &roots(&dir));
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), file.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn safe_resolve_for_write_accepts_new_file_inside_allowed_root() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("new.txt");
+        let r = safe_resolve_for_write_with(file.to_str().unwrap(), &roots(&dir));
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), file);
+    }
+
+    #[test]
+    fn safe_resolve_for_write_accepts_new_file_with_new_parent_inside_allowed_root() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("a").join("b").join("new.txt");
+        let r = safe_resolve_for_write_with(file.to_str().unwrap(), &roots(&dir));
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), file);
+    }
+
+    #[test]
+    fn safe_resolve_for_write_rejects_new_file_outside_allowed_root() {
+        let allowed = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let file = outside.path().join("new.txt");
+        let r = safe_resolve_for_write_with(file.to_str().unwrap(), &roots(&allowed));
+        assert!(r.is_err());
+        let msg = r.unwrap_err().to_string();
+        assert!(
+            msg.contains("不在允许的范围内"),
+            "应拒绝白名单外路径: {msg}"
+        );
+    }
+
+    #[test]
+    fn safe_resolve_for_write_rejects_parent_dir_traversal() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("..").join("escape.txt");
+        let r = safe_resolve_for_write_with(file.to_str().unwrap(), &roots(&dir));
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("不能包含 .."));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn safe_resolve_for_write_symlink_to_outside_rejected() {
+        let allowed = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let real = outside.path().join("real.txt");
+        fs::write(&real, "x").unwrap();
+        let link = allowed.path().join("link.txt");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let r = safe_resolve_for_write_with(link.to_str().unwrap(), &roots(&allowed));
+        assert!(r.is_err());
     }
 
     #[test]

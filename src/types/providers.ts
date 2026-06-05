@@ -7,17 +7,27 @@
  * 不在范围: Gemini / Azure OpenAI / 用户自定义 baseURL。
  */
 
-export type ProviderId = 'anthropic' | 'deepseek' | 'openai' | 'minimaxi';
+export type StaticProviderId = 'anthropic' | 'deepseek' | 'openai' | 'minimaxi';
+export type CustomProviderId = `custom:${string}`;
+export type ProviderId = StaticProviderId | CustomProviderId;
 
-export const ALL_PROVIDER_IDS: readonly ProviderId[] = [
+export const ALL_PROVIDER_IDS: readonly StaticProviderId[] = [
   'anthropic',
   'deepseek',
   'openai',
   'minimaxi',
 ] as const;
 
+export function isStaticProviderId(id: string): id is StaticProviderId {
+  return (ALL_PROVIDER_IDS as readonly string[]).includes(id);
+}
+
+export function isCustomProviderId(id: string): id is CustomProviderId {
+  return /^custom:[A-Za-z0-9_-]+$/.test(id);
+}
+
 export interface ProviderMeta {
-  id: ProviderId;
+  id: StaticProviderId;
   label: string;
   /** 设置面板输入框 placeholder 提示 */
   keyPlaceholder: string;
@@ -27,7 +37,7 @@ export interface ProviderMeta {
   keyHelpLabel: string;
 }
 
-export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
+export const PROVIDERS: Record<StaticProviderId, ProviderMeta> = {
   anthropic: {
     id: 'anthropic',
     label: 'Anthropic',
@@ -52,11 +62,10 @@ export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
   minimaxi: {
     id: 'minimaxi',
     label: 'MiniMax',
-    // v1.3 修正:之前误以为 MiniMax 走 OpenAI 兼容,key 是 eyJ... JWT。
-    // 实测 MiniMax 提供 Anthropic 兼容 endpoint,key 格式是 sk-cp-...(Anthropic 风格)。
+    // MiniMax Anthropic 兼容 endpoint 使用 sk-cp-...(Anthropic 风格)。
     keyPlaceholder: 'sk-cp-...',
-    keyHelpUrl: 'https://platform.minimaxi.com',
-    keyHelpLabel: 'platform.minimaxi.com',
+    keyHelpUrl: 'https://platform.minimax.io',
+    keyHelpLabel: 'platform.minimax.io',
   },
 };
 
@@ -94,8 +103,12 @@ const OPENAI_MODELS: ModelInfo[] = [
 const MINIMAXI_MODELS: ModelInfo[] = [
   { id: 'MiniMax-M2.7', provider: 'minimaxi', label: 'MiniMax M2.7', family: 'm2', supportsThinking: true, maxContextTokens: 128_000, groupLabel: 'MiniMax' },
   { id: 'MiniMax-M2.7-highspeed', provider: 'minimaxi', label: 'MiniMax M2.7 Highspeed', family: 'm2', supportsThinking: true, maxContextTokens: 128_000, groupLabel: 'MiniMax' },
+  { id: 'MiniMax-M3', provider: 'minimaxi', label: 'MiniMax M3', family: 'm3', supportsThinking: true, maxContextTokens: 128_000, groupLabel: 'MiniMax' },
   { id: 'MiniMax-M2.5', provider: 'minimaxi', label: 'MiniMax M2.5', family: 'm2', supportsThinking: false, maxContextTokens: 128_000, groupLabel: 'MiniMax' },
+  { id: 'MiniMax-M2.5-highspeed', provider: 'minimaxi', label: 'MiniMax M2.5 Highspeed', family: 'm2', supportsThinking: false, maxContextTokens: 128_000, groupLabel: 'MiniMax' },
   { id: 'MiniMax-M2.1', provider: 'minimaxi', label: 'MiniMax M2.1', family: 'm2', supportsThinking: false, maxContextTokens: 128_000, groupLabel: 'MiniMax' },
+  { id: 'MiniMax-M2.1-highspeed', provider: 'minimaxi', label: 'MiniMax M2.1 Highspeed', family: 'm2', supportsThinking: false, maxContextTokens: 128_000, groupLabel: 'MiniMax' },
+  { id: 'MiniMax-M2', provider: 'minimaxi', label: 'MiniMax M2', family: 'm2', supportsThinking: false, maxContextTokens: 128_000, groupLabel: 'MiniMax' },
 ];
 
 export const ALL_MODELS: readonly ModelInfo[] = [
@@ -105,7 +118,7 @@ export const ALL_MODELS: readonly ModelInfo[] = [
   ...MINIMAXI_MODELS,
 ];
 
-export const MODEL_REGISTRY: Record<ProviderId, readonly ModelInfo[]> = {
+export const MODEL_REGISTRY: Record<StaticProviderId, readonly ModelInfo[]> = {
   anthropic: ANTHROPIC_MODELS,
   deepseek: DEEPSEEK_MODELS,
   openai: OPENAI_MODELS,
@@ -118,15 +131,50 @@ export function getModelInfo(id: string): ModelInfo | null {
   return MODEL_BY_ID.get(id) ?? null;
 }
 
-export function getProviderOfModel(id: string): ProviderId | null {
-  return MODEL_BY_ID.get(id)?.provider ?? null;
+export function getProviderOfModel(id: string): StaticProviderId | null {
+  const provider = MODEL_BY_ID.get(id)?.provider;
+  if (provider && isStaticProviderId(provider)) return provider;
+  if (id.startsWith('deepseek-')) return 'deepseek';
+  if (id.startsWith('claude-')) return 'anthropic';
+  if (id.startsWith('gpt-') || /^o\d/.test(id)) return 'openai';
+  if (id.startsWith('MiniMax-')) return 'minimaxi';
+  return null;
 }
 
-export function listModelsByProvider(): Array<{ provider: ProviderId; models: ModelInfo[] }> {
+export function listModelsByProvider(): Array<{ provider: StaticProviderId; models: ModelInfo[] }> {
   return ALL_PROVIDER_IDS.map((p) => ({
     provider: p,
     models: [...MODEL_REGISTRY[p]],
   }));
+}
+
+/** 返回某 provider 的首个硬编码模型,用于默认模型 fallback。 */
+export function getFirstModelForProvider(provider: StaticProviderId): ModelInfo | null {
+  return MODEL_REGISTRY[provider][0] ?? null;
+}
+
+/**
+ * 在已配置 Provider 集合中解析可用模型。
+ * - preferredModel 所属 Provider 已配置:返回 preferredModel
+ * - preferredModel 未知或 Provider 未配置:按 ALL_PROVIDER_IDS 顺序返回首个已配置 Provider 的首个模型
+ * - 没有任何已配置 Provider:返回 null
+ */
+export function resolveConfiguredModel(
+  preferredModel: string,
+  configuredProviders: ReadonlySet<StaticProviderId>,
+): string | null {
+  const preferredProvider = getProviderOfModel(preferredModel);
+  if (preferredProvider && configuredProviders.has(preferredProvider)) {
+    return preferredModel;
+  }
+
+  for (const provider of ALL_PROVIDER_IDS) {
+    if (!configuredProviders.has(provider)) continue;
+    const model = getFirstModelForProvider(provider);
+    if (model) return model.id;
+  }
+
+  return null;
 }
 
 export const DEFAULT_MODEL_ID = 'MiniMax-M2.7';

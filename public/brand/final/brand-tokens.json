@@ -1,0 +1,20 @@
+{
+  "name": "Claw",
+  "concept": "Command C",
+  "colors": {
+    "primary": "#044AE9",
+    "softBlue": "#EAF2FF",
+    "surfaceBlue": "#F4F8FF",
+    "ink": "#0B1220",
+    "muted": "#44617F",
+    "white": "#FFFFFF"
+  },
+  "usage": {
+    "appIcon": "claw-app-icon.svg",
+    "wordmarkLight": "claw-wordmark-horizontal.svg",
+    "wordmarkDark": "claw-wordmark-white.svg",
+    "monoLight": "claw-mark-mono.svg",
+    "monoDark": "claw-mark-white.svg",
+    "uiMark": "claw-ui-mark.svg"
+  }
+}

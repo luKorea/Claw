@@ -21,7 +21,7 @@
 ## 项目概述
 
 - **项目名称**：`claw-client`，多 Provider AI 桌面客户端（v1.1+）。
-- **支持的 Provider**：Anthropic / DeepSeek / OpenAI / MiniMax（v1.1+）。DeepSeek 与 MiniMax 走 OpenAI 兼容协议。
+- **支持的 Provider**：Anthropic / DeepSeek / OpenAI / MiniMax（v1.1+）。DeepSeek / OpenAI 走 OpenAI 兼容协议；MiniMax 走 Anthropic 兼容协议并由 Rust 桥接请求。
 - **技术栈**：Tauri 2（Rust 后端）+ React 19 + TypeScript 5（strict）+ Vite 6 + Tailwind CSS 4 + Zustand 5。
 - **目标平台**：macOS / Windows / Linux 桌面端。**仅桌面端**，不要混入移动端或 H5 特殊处理。
 - **包管理器**：`pnpm`（与 `pnpm-lock.yaml` 保持一致）。
@@ -122,6 +122,7 @@ claw-client/
 | `conversation` | `list_conversations` / `get_conversation` / `create_conversation` / `update_conversation` / `delete_conversation` | 会话 CRUD |
 | `conversation` | `list_messages` / `save_message` / `delete_message` | 消息 CRUD |
 | `prompt` | `list_prompt_presets` / `create_prompt_preset` / `update_prompt_preset` / `delete_prompt_preset` | 提示词预设 |
+| `minimax` | `stream_minimax_anthropic` / `cancel_minimax_stream` | MiniMax Anthropic 兼容流式桥接（绕过 WebView CORS） |
 | `tool` | `read_text_file` / `list_dir` / `write_text_file` / `pick_directory` | 文件工具（白名单目录） |
 
 新增 command 必须同步：
@@ -143,16 +144,17 @@ Keychain 命名规则（v1.1+）：
 每个 provider 实现 `ProviderAdapter` 接口（`src/lib/providers/types.ts`），内部消化 SDK 事件 / SSE 协议 / tool schema / reasoning 语义，对外只暴露 `AsyncIterable<AdapterEvent>`。useChat 与 `streaming.ts` 不感知 provider 差异。
 
 - Anthropic：`@anthropic-ai/sdk` + `AnthropicAdapter`（`providers/anthropic.ts`），thinking 走 `thinking: { type: 'enabled', budget_tokens }`
-- DeepSeek / OpenAI / MiniMax：原生 `fetch` + ReadableStream SSE 解析（`providers/openai-compatible.ts`），共享 driver；各家 adapter 仅注入 baseURL + provider 标识,Key 统一 `sk-` 前缀
-- DeepSeek-R1 与 MiniMax-M2.7 走 `reasoning_content` 字段流式回 reasoning
+- DeepSeek / OpenAI：原生 `fetch` + ReadableStream SSE 解析（`providers/openai-compatible.ts`），共享 driver；各家 adapter 仅注入 baseURL + provider 标识,Key 统一 `sk-` 前缀
+- MiniMax：前端 `providers/minimaxi.ts` 构造 Anthropic 兼容请求体，Rust `commands/minimax.rs` 用 `reqwest` 请求 `https://api.minimax.io/anthropic/v1/messages` 并通过 Tauri Channel 回传流式事件
+- DeepSeek-R1 走 `reasoning_content` 字段流式回 reasoning；MiniMax thinking 走 Anthropic 兼容 `thinking_delta`
 - 工具 schema 用 OpenAI 风格 `parameters`（JSON Schema），Anthropic adapter 内部转 `input_schema`
 
-流式仍走 SDK / WebView，不绕到 Rust 端。各 provider 必须在浏览器 CORS 允许范围内（已通过 CSP 白名单）。
+除 MiniMax 外，流式仍走 SDK / WebView，不绕到 Rust 端。MiniMax 因官方接口无可用浏览器 CORS 预检响应，走 Rust 桥接。
 
 ### 2. 流式输出走 SDK + Tauri WebView
 
-直接用各 provider 的 SDK 或原生 fetch，不绕到 Rust 端。Tauri WebView 不拦截浏览器 CORS。
-**前提**：各 provider API 支持浏览器 CORS；CSP `connect-src` 显式白名单三个域名。
+Anthropic / DeepSeek / OpenAI 直接用 SDK 或原生 fetch，不绕到 Rust 端。Tauri WebView 不拦截浏览器 CORS。
+**前提**：前端直连的 provider API 支持浏览器 CORS；MiniMax 使用 Rust `reqwest` 桥接。
 
 ### 3. 多轮工具调用
 
@@ -225,7 +227,7 @@ OAI 协议：tool 结果是独立的 `role: 'tool'` message（由 adapter 内部
 - API Key 只通过 `get_api_key` 临时取出，**不在前端任何地方长期缓存**。
 - 文件工具的路径必须经过 `commands/tool.rs::safe_resolve` 白名单检查。
 - 写文件默认禁用，需用户在 Settings → 工具 中显式启用。
-- CSP 严格限制（见 `tauri.conf.json`）：`connect-src` 只允许 `https://api.anthropic.com` / `https://api.deepseek.com` / `https://api.openai.com` / `https://api.minimaxi.com`（v1.1+）。新增 provider 域名需同步更新 CSP 并在本文件记录。
+- CSP 严格限制（见 `tauri.conf.json`）：`connect-src` 只允许 `https://api.anthropic.com` / `https://api.deepseek.com` / `https://api.openai.com` / `https://api.minimax.io`（v1.1+）。新增 provider 域名需同步更新 CSP 并在本文件记录。
 - 不在生产构建开启 devtools。
 
 ## Git 规范

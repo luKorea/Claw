@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSettingsStore } from '@/stores/settings';
 import {
   ALL_PROVIDER_IDS,
-  type ProviderId,
+  type StaticProviderId,
 } from '@/types/providers';
 import {
   deleteApiKey,
@@ -20,7 +20,7 @@ export interface ApiKeyState {
   error: string | null;
 }
 
-type ApiKeyStateMap = Record<ProviderId, ApiKeyState>;
+type ApiKeyStateMap = Record<StaticProviderId, ApiKeyState>;
 
 const initialKeyState: ApiKeyState = {
   configured: false,
@@ -131,7 +131,7 @@ export function useSettings() {
     refreshAll();
   }, [refreshAll]);
 
-  const refreshOne = useCallback(async (provider: ProviderId) => {
+  const refreshOne = useCallback(async (provider: StaticProviderId) => {
     setKeys((prev) => ({ ...prev, [provider]: { ...prev[provider], loading: true, error: null } }));
     try {
       const s = await getApiKeyStatus(provider);
@@ -158,7 +158,7 @@ export function useSettings() {
   }, []);
 
   const saveKey = useCallback(
-    async (provider: ProviderId, key: string) => {
+    async (provider: StaticProviderId, key: string) => {
       setKeys((prev) => ({
         ...prev,
         [provider]: { ...prev[provider], saving: true, error: null },
@@ -182,7 +182,7 @@ export function useSettings() {
   );
 
   const removeKey = useCallback(
-    async (provider: ProviderId) => {
+    async (provider: StaticProviderId) => {
       setKeys((prev) => ({
         ...prev,
         [provider]: { ...prev[provider], saving: true, error: null },
@@ -208,7 +208,7 @@ export function useSettings() {
   /** 同步拿已配置的 provider 集合(用于 UI 提示) */
   // v1.2 Bug 3.1:用 useMemo 锁住 Set 引用,避免每次 render 新建触发子组件 re-render
   const configuredProviders = useMemo(
-    () => new Set<ProviderId>(ALL_PROVIDER_IDS.filter((p) => keys[p].configured)),
+    () => new Set<StaticProviderId>(ALL_PROVIDER_IDS.filter((p) => keys[p].configured)),
     [keys],
   );
 

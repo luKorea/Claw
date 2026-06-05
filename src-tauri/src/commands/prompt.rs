@@ -116,21 +116,19 @@ pub async fn create_prompt_preset(input: NewPromptPreset) -> AppResult<PromptPre
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp_millis();
     let builtin = if input.builtin.unwrap_or(false) { 1 } else { 0 };
-    create(
-        &pool,
-        &id,
-        &input.name,
-        &input.content,
-        builtin,
-        now,
-    )
-    .await
+    create(&pool, &id, &input.name, &input.content, builtin, now).await
 }
 
 #[tauri::command]
 pub async fn update_prompt_preset(input: UpdatePromptPreset) -> AppResult<()> {
     let pool = db::pool()?;
-    update_partial(&pool, &input.id, input.name.as_deref(), input.content.as_deref()).await
+    update_partial(
+        &pool,
+        &input.id,
+        input.name.as_deref(),
+        input.content.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]

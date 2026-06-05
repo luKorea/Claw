@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Claw Logo Final Kit</title>
+    <style>
+      :root {
+        --primary: #044ae9;
+        --soft: #f4f8ff;
+        --soft-2: #eaf2ff;
+        --ink: #0b1220;
+        --muted: #44617f;
+        --border: #d7e6ff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: #fff;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+      main {
+        width: min(1120px, calc(100vw - 48px));
+        margin: 0 auto;
+        padding: 40px 0 56px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 34px;
+        line-height: 1.1;
+      }
+      .meta {
+        margin: 0 0 28px;
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1.1fr .9fr;
+        gap: 18px;
+      }
+      .panel {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fff;
+      }
+      .panel h2 {
+        margin: 0;
+        padding: 16px;
+        font-size: 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .stage {
+        display: grid;
+        place-items: center;
+        padding: 42px;
+        background:
+          linear-gradient(135deg, rgba(4, 74, 233, 0.07), transparent 48%),
+          var(--soft);
+      }
+      .stage img {
+        width: 240px;
+        height: 240px;
+      }
+      .sizes {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding: 20px;
+      }
+      .sizes img:nth-child(1) {
+        width: 128px;
+        height: 128px;
+      }
+      .sizes img:nth-child(2) {
+        width: 64px;
+        height: 64px;
+      }
+      .sizes img:nth-child(3) {
+        width: 32px;
+        height: 32px;
+      }
+      .wordmark {
+        display: grid;
+        gap: 18px;
+        padding: 22px;
+      }
+      .wordmark img {
+        width: 100%;
+        max-width: 520px;
+      }
+      .dark {
+        background: var(--ink);
+      }
+      .marks {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .mark-cell {
+        display: grid;
+        place-items: center;
+        min-height: 210px;
+        padding: 24px;
+        background: #fff;
+      }
+      .mark-cell.dark {
+        background: var(--ink);
+      }
+      .mark-cell img {
+        width: 96px;
+        height: 96px;
+      }
+      @media (max-width: 860px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Claw Logo Final Kit</h1>
+      <p class="meta">Command C, brand color #044AE9, prepared for website, mini program, and desktop client.</p>
+      <section class="grid">
+        <article class="panel">
+          <h2>App Icon</h2>
+          <div class="stage">
+            <img src="./claw-app-icon.svg" alt="Claw app icon" />
+          </div>
+          <div class="sizes">
+            <img src="./claw-app-icon.svg" alt="" />
+            <img src="./claw-app-icon.svg" alt="" />
+            <img src="./claw-app-icon.svg" alt="" />
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Mono Marks</h2>
+          <div class="marks">
+            <div class="mark-cell">
+              <img src="./claw-mark-mono.svg" alt="Claw blue mono mark" />
+            </div>
+            <div class="mark-cell dark">
+              <img src="./claw-mark-white.svg" alt="Claw white mono mark" />
+            </div>
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Light Wordmark</h2>
+          <div class="wordmark">
+            <img src="./claw-wordmark-horizontal.svg" alt="Claw horizontal wordmark" />
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Dark Wordmark</h2>
+          <div class="wordmark dark">
+            <img src="./claw-wordmark-white.svg" alt="Claw white horizontal wordmark" />
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>
