@@ -137,13 +137,19 @@ pnpm build:tauri:windows:cross
 - Windows: `src-tauri/target/release/bundle/msi/*.msi`
 - Linux: `src-tauri/target/release/bundle/appimage/*.AppImage`
 
-`bundle.targets = "all"` 表示“当前运行系统支持的全部 bundle”，不是一次生成三端产物。Windows 正式安装包推荐用 GitHub Actions 的 `Build Windows` workflow 生成：
+`bundle.targets = "all"` 表示“当前运行系统支持的全部 bundle”，不是一次生成三端产物。正式版本下载入口：
 
-- 手动触发：GitHub → Actions → Build Windows → Run workflow
-- 发布触发：推送 `v*` tag，例如 `v0.1.0`
-- 产物：workflow artifact `claw-windows-*`，包含 `.msi` / `.exe`
+https://github.com/luKorea/Claw/releases
+
+发布触发方式：推送 `v*` tag，例如 `v0.1.1`。GitHub Actions 会在 Windows / macOS / Linux 三个平台构建，并把安装包直接上传到对应 Release：
+
+- Windows: `.msi` / `.exe`
+- macOS: universal `.dmg`
+- Linux: `.AppImage` / `.deb`
 
 本机 macOS 交叉编译只能生成 NSIS `.exe`，MSI 仍建议在 Windows runner 上构建。
+
+当前 macOS 产物未做 Apple 签名与 notarization，首次打开时可能出现系统安全提示。
 
 ## 📝 路线图
 
