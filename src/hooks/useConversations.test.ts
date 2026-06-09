@@ -5,6 +5,7 @@ vi.mock('@/lib/db', () => ({
     create: vi.fn(),
     update: vi.fn(),
     remove: vi.fn(),
+    removeMany: vi.fn(),
   },
   messageApi: {
     list: vi.fn(),
@@ -23,6 +24,7 @@ import type { Conversation } from '@/types/conversation';
 const mockedList = vi.mocked(conversationApi.list);
 const mockedGet = vi.mocked(conversationApi.get);
 const mockedUpdate = vi.mocked(conversationApi.update);
+const mockedRemoveMany = vi.mocked(conversationApi.removeMany);
 
 function makeConv(overrides: Partial<Conversation> = {}): Conversation {
   return {
@@ -43,6 +45,7 @@ describe('useConversations', () => {
     mockedList.mockReset();
     mockedGet.mockReset();
     mockedUpdate.mockReset();
+    mockedRemoveMany.mockReset();
     useConversationsStore.setState({ list: [], currentId: null, loading: false });
     useChatStore.setState({
       conversationId: null,
@@ -106,5 +109,32 @@ describe('useConversations', () => {
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).toBe('db down');
     expect(useConversationsStore.getState().list[0]?.model).toBe('MiniMax-M2.7');
+  });
+
+  it('removeMany 删除包含当前会话时清空聊天区', async () => {
+    const conversations = [
+      makeConv({ id: 'a', title: 'A' }),
+      makeConv({ id: 'b', title: 'B' }),
+    ];
+    mockedList.mockResolvedValue(conversations);
+    mockedRemoveMany.mockResolvedValue();
+    useConversationsStore.setState({ list: conversations, currentId: 'a' });
+    useChatStore.setState({
+      conversationId: 'a',
+      messages: [{ id: 'm1', role: 'user', content: [], createdAt: 0 }],
+      isStreaming: false,
+      error: null,
+      lastUsage: null,
+    });
+
+    const { result } = renderHook(() => useConversations());
+    await act(async () => {
+      await result.current.removeMany(['a', 'b']);
+    });
+
+    expect(mockedRemoveMany).toHaveBeenCalledWith(['a', 'b']);
+    expect(useConversationsStore.getState().list).toEqual([]);
+    expect(useConversationsStore.getState().currentId).toBeNull();
+    expect(useChatStore.getState().conversationId).toBeNull();
   });
 });

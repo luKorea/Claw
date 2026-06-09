@@ -6,7 +6,13 @@
  */
 
 import { useState } from 'react';
-import { CheckCircle2Icon, EyeIcon, EyeOffIcon, Trash2Icon } from 'lucide-react';
+import {
+  CheckCircle2Icon,
+  EyeIcon,
+  EyeOffIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from 'lucide-react';
 
 import { useSettings } from '@/hooks/useSettings';
 import type { ApiKeyState } from '@/hooks/useSettings';
@@ -19,7 +25,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export function ApiKeyTab() {
-  const { keys, saveKey, removeKey, refreshOne } = useSettings();
+  const { keys, saveKey, removeKey, refreshOne, syncOne } = useSettings();
 
   return (
     <div className="space-y-4 pt-2">
@@ -31,6 +37,7 @@ export function ApiKeyTab() {
           onSave={(k) => saveKey(provider, k)}
           onRemove={() => removeKey(provider)}
           onRefresh={() => refreshOne(provider)}
+          onSync={() => syncOne(provider)}
         />
       ))}
     </div>
@@ -43,6 +50,7 @@ interface ProviderKeyCardProps {
   onSave: (key: string) => Promise<void>;
   onRemove: () => Promise<void>;
   onRefresh: () => Promise<void>;
+  onSync: () => Promise<void>;
 }
 
 export function ProviderKeyCard({
@@ -51,6 +59,7 @@ export function ProviderKeyCard({
   onSave,
   onRemove,
   onRefresh,
+  onSync,
 }: ProviderKeyCardProps) {
   const meta = PROVIDERS[provider];
   const [input, setInput] = useState('');
@@ -58,7 +67,7 @@ export function ProviderKeyCard({
   const [confirmOpen, setConfirmOpen] = useState(false);
   // v1.2 Bug 3.2:保存 Key 成功后,触发该 provider 的动态模型拉取
   // v1.3:retry 暴露给 ApiKeyTab,错误状态可手动重试
-  const { fetchProvider, retry } = useModels();
+  const { fetchProvider, retry, resetProvider } = useModels();
 
   const handleSave = async () => {
     if (!input.trim()) return;
@@ -66,8 +75,21 @@ export function ProviderKeyCard({
       await onSave(input.trim());
       setInput('');
       if (LISTABLE_PROVIDERS_FRONTEND.includes(provider)) {
-        void fetchProvider(provider);
+        await fetchProvider(provider, { force: true });
       }
+    } catch {
+      // error 在 state 里
+    }
+  };
+
+  const handleRemove = async () => {
+    await onRemove();
+    resetProvider(provider);
+  };
+
+  const handleSync = async () => {
+    try {
+      await onSync();
     } catch {
       // error 在 state 里
     }
@@ -89,6 +111,11 @@ export function ProviderKeyCard({
         )}
         {state.preview && (
           <code className="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs">{state.preview}</code>
+        )}
+        {!state.metadataKnown && !state.loading && (
+          <span className="ml-auto rounded bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700">
+            可导入旧 Key
+          </span>
         )}
       </div>
 
@@ -135,18 +162,36 @@ export function ProviderKeyCard({
             {meta.keyHelpLabel}
           </a>{' '}
           获取。Key 以 <code>{provider === 'minimaxi' ? 'sk-cp-' : 'sk-'}</code> 开头。
+          保存到本机 Claw 配置文件。
         </span>
-        {state.configured && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setConfirmOpen(true)}
-            disabled={state.saving}
-          >
-            <Trash2Icon className="size-3.5" />
-            清除
-          </Button>
-        )}
+        <div className="flex items-center gap-1">
+          {!state.metadataKnown && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleSync()}
+              disabled={state.loading || state.saving}
+            >
+              {state.loading ? (
+                <Spinner size="sm" />
+              ) : (
+                <RefreshCwIcon className="size-3.5" />
+              )}
+              导入旧 Key
+            </Button>
+          )}
+          {state.configured && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmOpen(true)}
+              disabled={state.saving}
+            >
+              <Trash2Icon className="size-3.5" />
+              清除
+            </Button>
+          )}
+        </div>
       </div>
 
       {state.error && (
@@ -157,7 +202,9 @@ export function ProviderKeyCard({
             size="sm"
             onClick={async () => {
               await onRefresh();
-              await retry(provider);
+              if (LISTABLE_PROVIDERS_FRONTEND.includes(provider)) {
+                await retry(provider);
+              }
             }}
           >
             重试
@@ -172,7 +219,7 @@ export function ProviderKeyCard({
         description="确认删除已保存的 API Key?此操作不可撤销。"
         confirmText="删除"
         destructive
-        onConfirm={onRemove}
+        onConfirm={handleRemove}
       />
     </div>
   );

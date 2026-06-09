@@ -40,6 +40,7 @@ import App from '@/App';
 import { useSettings } from '@/hooks/useSettings';
 import { useConversations } from '@/hooks/useConversations';
 import { useModels } from '@/hooks/useModels';
+import { resetCustomProvidersStoreForTest, useCustomProvidersStore } from '@/stores/customProviders';
 
 const mockedUseSettings = vi.mocked(useSettings);
 const mockedUseConversations = vi.mocked(useConversations);
@@ -48,6 +49,7 @@ const mockedUseModels = vi.mocked(useModels);
 const readyMissingKey: ApiKeyState = {
   configured: false,
   preview: null,
+  metadataKnown: true,
   loading: false,
   saving: false,
   error: null,
@@ -69,6 +71,8 @@ describe('App startup API Key guidance', () => {
   const setDefaultModel = vi.fn();
 
   beforeEach(() => {
+    resetCustomProvidersStoreForTest();
+    useCustomProvidersStore.setState({ hydrated: true });
     setDefaultModel.mockReset();
     mockedUseConversations.mockReturnValue({
       current: null,

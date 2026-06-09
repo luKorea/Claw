@@ -2,6 +2,7 @@ use keyring::Entry;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::time::Duration;
 
 const SERVICE: &str = "com.claw.client";
@@ -87,7 +88,59 @@ fn read_keychain_account(account: &str) -> Result<Option<String>, String> {
     }
 }
 
-fn credential_for(
+fn db_path_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(path) = std::env::var("CLAW_DB_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            paths.push(PathBuf::from(trimmed));
+        }
+    }
+    if let Some(data_dir) = dirs::data_dir() {
+        paths.push(data_dir.join(SERVICE).join("claw.db"));
+    }
+    paths
+}
+
+async fn read_sqlite_key(provider: &str) -> Result<Option<(String, String)>, String> {
+    for path in db_path_candidates() {
+        if !path.exists() {
+            continue;
+        }
+        let url = format!("sqlite://{}?mode=ro", path.display());
+        let pool = sqlx::SqlitePool::connect(&url)
+            .await
+            .map_err(|err| format!("SQLite:{} open failed: {err}", path.display()))?;
+        let row_result =
+            sqlx::query_as::<_, (String,)>("SELECT api_key FROM api_keys WHERE provider = ?1")
+                .bind(provider)
+                .fetch_optional(&pool)
+                .await;
+        let row = match row_result {
+            Ok(row) => row,
+            Err(sqlx::Error::Database(db_err))
+                if db_err.message().contains("no such table: api_keys") =>
+            {
+                continue;
+            }
+            Err(err) => {
+                return Err(format!("SQLite:{} read failed: {err}", path.display()));
+            }
+        };
+        if let Some((secret,)) = row {
+            let trimmed = secret.trim();
+            if !trimmed.is_empty() {
+                return Ok(Some((
+                    trimmed.to_string(),
+                    format!("SQLite:{}", path.display()),
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
+async fn credential_for(
     provider: &ProviderConfig,
     lookup_errors: &mut Vec<String>,
 ) -> Option<Credential> {
@@ -99,6 +152,16 @@ fn credential_for(
                 source: provider.env_key.to_string(),
             });
         }
+    }
+
+    match read_sqlite_key(provider.id).await {
+        Ok(Some((secret, source))) => return Some(Credential { secret, source }),
+        Ok(None) => {}
+        Err(err) => lookup_errors.push(format!("{} {err}", provider.label)),
+    }
+
+    if std::env::var("CLAW_SMOKE_USE_KEYCHAIN").ok().as_deref() != Some("1") {
+        return None;
     }
 
     let mut accounts = provider
@@ -344,20 +407,21 @@ async fn smoke_provider(
 async fn main() {
     let providers = selected_providers();
     let mut lookup_errors = Vec::new();
-    let configured = providers
-        .iter()
-        .filter_map(|provider| {
-            credential_for(provider, &mut lookup_errors).map(|credential| (*provider, credential))
-        })
-        .collect::<Vec<_>>();
+    let mut configured = Vec::new();
+    for provider in providers {
+        if let Some(credential) = credential_for(provider, &mut lookup_errors).await {
+            configured.push((provider, credential));
+        }
+    }
 
     if configured.is_empty() {
         println!(
-            "[real-smoke] No configured Provider keys found. Checked env vars and OS Keychain."
+            "[real-smoke] No configured Provider keys found. Checked env vars and local claw.db."
         );
         println!("[real-smoke] Env override names: CLAW_ANTHROPIC_API_KEY, CLAW_DEEPSEEK_API_KEY, CLAW_OPENAI_API_KEY, CLAW_MINIMAXI_API_KEY.");
+        println!("[real-smoke] Optional legacy Keychain lookup: set CLAW_SMOKE_USE_KEYCHAIN=1.");
         if !lookup_errors.is_empty() {
-            println!("[real-smoke] Keychain lookup issue(s):");
+            println!("[real-smoke] Credential lookup issue(s):");
             for err in lookup_errors {
                 println!("[real-smoke] - {err}");
             }
@@ -383,7 +447,7 @@ async fn main() {
         configured.len()
     );
     if !lookup_errors.is_empty() {
-        println!("[real-smoke] Non-fatal Keychain lookup issue(s):");
+        println!("[real-smoke] Non-fatal credential lookup issue(s):");
         for err in &lookup_errors {
             println!("[real-smoke] - {err}");
         }

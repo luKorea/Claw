@@ -30,8 +30,8 @@
 - **页面 / 路由**：无传统路由，单页应用 + 状态切换视图。URL 不暴露会话结构。
 - **后端命令**：集中在 `src-tauri/src/commands/`，前端通过 `@tauri-apps/api/core` 的 `invoke` 调用。
 - **本地存储**：
-  - **API Key**：操作系统 Keychain（macOS Keychain / Windows Credential Manager / Linux Secret Service）。前端永不留存明文。
-  - **会话 / 消息 / 提示词 / MCP 配置**：SQLite（`app_data_dir/claw.db`，WAL 模式）。
+  - **API Key**：SQLite（`app_data_dir/claw.db` 的 `api_keys` 表）。旧 Keychain 只用于用户显式“导入旧 Key”，前端永不持久化明文。
+  - **会话 / 消息 / 提示词 / 自定义 Provider / MCP 配置**：SQLite（`app_data_dir/claw.db`，WAL 模式）。
   - **K/V 设置**：`tauri-plugin-store`（`localStorage` fallback）。
   - **主题 / 工具启用 / 默认参数**：`localStorage`。
 - **构建产物**：
@@ -114,15 +114,21 @@ claw-client/
 
 | 模块 | 命令 | 说明 |
 | --- | --- | --- |
-| `settings` | `get_api_key_status(provider)` | 查询某 provider 是否已配置 + 脱敏预览；旧 v1.0 `anthropic-api-key` 视为 `anthropic` |
-| `settings` | `set_api_key(provider, key)` | 写入 Keychain（校验 `sk-` 前缀）；首次写 anthropic 时自动删 LEGACY_ACCOUNT |
-| `settings` | `delete_api_key(provider)` | 清除某 provider 的 Key |
-| `settings` | `get_api_key(provider)` | **临时**取出明文 Key（仅发起请求时用） |
-| `settings` | `list_configured_providers()` | 启动时前端调用,列出已配 key 的 provider id |
+| `settings` | `get_api_key_status(provider)` | 查询 SQLite 中的 Key 配置状态 + 脱敏预览；不读取 Keychain 明文 |
+| `settings` | `list_api_key_statuses()` | 批量查询内置 Provider Key 状态 |
+| `settings` | `sync_api_key_status(provider)` | 用户显式导入旧 Key 时读取一次 Keychain，并写入 SQLite |
+| `settings` | `set_api_key(provider, key)` | 写入 SQLite `api_keys`（trim + 非空校验）并同步元数据 |
+| `settings` | `delete_api_key(provider)` | 清除 SQLite 中某 provider 的 Key |
+| `settings` | `get_api_key(provider)` | 从 SQLite 临时取出明文 Key（仅发起请求时用） |
+| `settings` | `list_configured_providers()` | 启动/发送前调用,只从 SQLite `api_keys` 列出已配 key 的静态 provider id |
 | `conversation` | `list_conversations` / `get_conversation` / `create_conversation` / `update_conversation` / `delete_conversation` | 会话 CRUD |
 | `conversation` | `list_messages` / `save_message` / `delete_message` | 消息 CRUD |
 | `prompt` | `list_prompt_presets` / `create_prompt_preset` / `update_prompt_preset` / `delete_prompt_preset` | 提示词预设 |
 | `minimax` | `stream_minimax_anthropic` / `cancel_minimax_stream` | MiniMax Anthropic 兼容流式桥接（绕过 WebView CORS） |
+| `custom_provider` | `list_custom_providers` / `create_custom_provider` / `update_custom_provider` / `delete_custom_provider` | 自定义 Provider SQLite CRUD |
+| `custom_provider` | `list_custom_provider_models(input)` | 获取自定义 Provider 可用模型列表 |
+| `custom_provider` | `stream_custom_provider(input)` / `cancel_custom_provider_stream(requestId)` | 自定义 Provider 聊天桥接；支持 `auto` / `stream` / `non-stream` 模式 |
+| `custom_provider` | `test_custom_provider_chat(input)` | 使用当前配置发起短消息测试，返回脱敏 endpoint / 预览诊断 |
 | `tool` | `read_text_file` / `list_dir` / `write_text_file` / `pick_directory` | 文件工具（白名单目录） |
 
 新增 command 必须同步：
@@ -132,10 +138,10 @@ claw-client/
 3. 在前端 `lib/<module>.ts` 加 wrapper
 4. 更新本文件表格
 
-Keychain 命名规则（v1.1+）：
+旧 Keychain 导入规则（仅 `sync_api_key_status` 使用）：
 
 - SERVICE = `com.claw.client`（与 `tauri.conf.json.identifier` 一致）
-- account = `api-key:{provider}`（v1.0 旧 `anthropic-api-key` 自动迁移）
+- account = `api-key:{provider}`；v1.0 旧 `anthropic-api-key` 仅对 Anthropic 尝试读取
 
 ## 关键设计决策
 
@@ -258,7 +264,7 @@ v1 **仅桌面端**（macOS / Windows / Linux）。不要添加 iOS / Android / 
 | --- | --- | --- |
 | 运行时配置 | `src-tauri/tauri.conf.json` / `Cargo.toml` | 窗口、CSP、依赖 |
 | 权限声明 | `src-tauri/capabilities/default.json` | 文件系统 / 弹窗 / SQL 范围 |
-| Keychain | `src-tauri/src/commands/settings.rs` | API Key 唯一入口,多 account (`api-key:{provider}`) |
+| API Key 配置 | `src-tauri/src/commands/settings.rs` | API Key 唯一入口，SQLite 主源；旧 Keychain 只做显式导入 |
 | 数据库 | `src-tauri/src/db/` | 迁移、连接池 |
 | 工具执行 | `src-tauri/src/commands/tool.rs` | 路径白名单 |
 | 流式核心 | `src/hooks/useChat.ts` | 多轮 tool_use 循环 + 选 adapter |

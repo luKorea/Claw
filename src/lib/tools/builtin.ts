@@ -13,14 +13,15 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
   {
     name: 'read_file',
     description:
-      '读取本地文本文件的内容(UTF-8)。文件大小上限默认 1MB。仅允许访问用户主目录、桌面、文档、下载、临时目录下的文件。',
+      '读取本地 UTF-8 文本文件内容。只能传文件路径，目录必须改用 list_dir。支持 ~、$HOME、/home 表示当前用户主目录；文件大小上限默认 1MB。仅允许访问用户主目录、桌面、文档、下载、临时目录下的文件。',
     source: 'builtin',
     parameters: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: '文件的绝对路径',
+          description:
+            '文本文件路径，不要传目录。可使用绝对路径、~/...、$HOME/...，或 /home 表示当前用户主目录。',
         },
         max_bytes: {
           type: 'integer',
@@ -33,14 +34,16 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'list_dir',
-    description: '列出指定目录下的文件和子目录。',
+    description:
+      '列出指定目录下的文件和子目录。读取目录内容时使用此工具，不要用 read_file。',
     source: 'builtin',
     parameters: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: '目录的绝对路径',
+          description:
+            '目录路径。可使用绝对路径、~/...、$HOME/...，或 /home 表示当前用户主目录。',
         },
       },
       required: ['path'],

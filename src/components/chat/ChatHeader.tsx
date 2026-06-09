@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrainIcon } from 'lucide-react';
 
 import { useConversations } from '@/hooks/useConversations';
-import { getCustomProvider } from '@/stores/customProviders';
+import { resolveCustomModelSelection } from '@/stores/customProviders';
 import { useSettingsStore } from '@/stores/settings';
-import { getModelInfo, isCustomProviderId } from '@/types/providers';
+import { getModelInfo } from '@/types/providers';
 import { cn } from '@/lib/utils';
 
 import { Switch } from '@/components/ui/switch';
@@ -28,18 +28,22 @@ export function ChatHeader() {
       : defaultThinkingEnabled;
   const thinkingBudget = current?.thinking_budget ?? defaultThinkingBudget;
 
-  // v1.3:不再用 useEffect 同步外部值,改成"派生 + 派生时同步"。
-  // useState 初始用 thinkingBudget(只在 mount 时读一次);外部变化时由 update 函数透传。
   const [budget, setBudget] = useState(thinkingBudget);
+
+  useEffect(() => {
+    setBudget(thinkingBudget);
+  }, [current?.id, thinkingBudget]);
 
   const update = async (patch: Parameters<typeof conv.update>[0]) => {
     if (!current) return;
     await conv.update(patch);
   };
 
-  const customProvider = isCustomProviderId(model) ? getCustomProvider(model) : null;
+  const customSelection = resolveCustomModelSelection(model);
   const supportsThinking =
-    customProvider?.supportsThinking ?? getModelInfo(model)?.supportsThinking ?? false;
+    customSelection?.provider.supportsThinking ??
+    getModelInfo(model)?.supportsThinking ??
+    false;
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur">

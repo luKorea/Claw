@@ -16,6 +16,7 @@ export const conversationApi = {
   update: (input: UpdateConversationInput) =>
     invoke<void>('update_conversation', { input }),
   remove: (id: string) => invoke<void>('delete_conversation', { id }),
+  removeMany: (ids: string[]) => invoke<void>('delete_conversations', { ids }),
 };
 
 export const messageApi = {

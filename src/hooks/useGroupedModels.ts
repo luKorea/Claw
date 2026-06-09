@@ -8,20 +8,8 @@
  * 输出:Record<groupLabel, ModelInfo[]>(动态 model 自动补 label + group)
  */
 
-import { useMemo } from 'react';
-
-import { useModels } from '@/hooks/useModels';
-import { useSettings } from '@/hooks/useSettings';
-import {
-  customProviderToModelInfo,
-  useCustomProvidersStore,
-} from '@/stores/customProviders';
-import {
-  ALL_MODELS,
-  isStaticProviderId,
-  type ModelInfo,
-  type StaticProviderId,
-} from '@/types/providers';
+import { useAvailableModels } from '@/hooks/useAvailableModels';
+import type { ModelInfo } from '@/types/providers';
 
 export interface UseGroupedModelsReturn {
   /** 按 groupLabel 聚合后的 model 列表(只含已配 provider)。 */
@@ -29,53 +17,6 @@ export interface UseGroupedModelsReturn {
 }
 
 export function useGroupedModels(): UseGroupedModelsReturn {
-  const { configuredProviders } = useSettings();
-  const { mergedByProvider } = useModels();
-  const customProviders = useCustomProvidersStore((s) => s.providers);
-
-  return useMemo<UseGroupedModelsReturn>(() => {
-    // 1. 硬编码模型:按 groupLabel 聚合,只保留已配 provider
-    const grouped: Record<string, ModelInfo[]> = ALL_MODELS.filter(
-      (m) => isStaticProviderId(m.provider) && configuredProviders.has(m.provider),
-    ).reduce<Record<string, ModelInfo[]>>((acc, m) => {
-      (acc[m.groupLabel] ??= []).push(m);
-      return acc;
-    }, {});
-
-    // 2. 动态拉取的 id(可能不在 ALL_MODELS 里):归到同 provider 的 group
-    for (const [p, ids] of Object.entries(mergedByProvider) as [
-      StaticProviderId,
-      string[],
-    ][]) {
-      if (!configuredProviders.has(p)) continue;
-      for (const id of ids) {
-        // isModelKnown 已包含硬编码;这里只看动态 + 已在硬编码里的去重
-        const meta = ALL_MODELS.find((m) => m.id === id);
-        if (meta) continue; // 硬编码已包含,跳过
-        // 动态 id 用 id 当 label;找同 provider 的 groupLabel
-        const sameProvider = ALL_MODELS.find((m) => m.provider === p);
-        const groupKey = sameProvider?.groupLabel ?? p;
-        grouped[groupKey] ??= [];
-        if (!grouped[groupKey].some((m) => m.id === id)) {
-          grouped[groupKey].push({
-            id,
-            provider: p,
-            label: id,
-            family: id,
-            supportsThinking: false,
-            groupLabel: groupKey,
-          });
-        }
-      }
-    }
-
-    const customModels = customProviders
-      .filter((provider) => provider.enabled)
-      .map(customProviderToModelInfo);
-    if (customModels.length > 0) {
-      grouped['自定义'] = [...(grouped['自定义'] ?? []), ...customModels];
-    }
-
-    return { grouped };
-  }, [configuredProviders, customProviders, mergedByProvider]);
+  const { grouped } = useAvailableModels();
+  return { grouped };
 }

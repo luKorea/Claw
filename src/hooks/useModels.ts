@@ -25,11 +25,13 @@ export interface UseModelsReturn {
   ids: (provider: StaticProviderId) => string[];
   loading: (provider: StaticProviderId) => boolean;
   error: (provider: StaticProviderId) => string | null;
-  fetchProvider: (provider: StaticProviderId) => Promise<void>;
+  fetchProvider: (provider: StaticProviderId, options?: { force?: boolean }) => Promise<void>;
   /** 清空错误状态 + 重新拉取(失败后用户可手动重试) */
   retry: (provider: StaticProviderId) => Promise<void>;
   /** 只清错误状态,保留旧 ids(用于 UI 隐藏错误条) */
   clearError: (provider: StaticProviderId) => void;
+  /** 清空某 provider 的模型目录缓存。 */
+  resetProvider: (provider: StaticProviderId) => void;
   isModelKnown: (id: string, provider: StaticProviderId) => boolean;
   /** 合并(硬编码 + 动态)后,按 provider 分组的 model 列表(去重)。fallback 到 ALL_MODELS。 */
   mergedByProvider: Record<StaticProviderId, string[]>;
@@ -68,10 +70,11 @@ export function useModels(): UseModelsReturn {
   );
 
   const fetchProvider = useCallback(
-    async (provider: StaticProviderId) => {
+    async (provider: StaticProviderId, options?: { force?: boolean }) => {
       // 缓存命中:fetchedAt 在 TTL 内且 ids 非空 → 跳过
       const cur = useModelsStore.getState().byProvider[provider];
       if (
+        !options?.force &&
         cur.fetchedAt !== null &&
         Date.now() - cur.fetchedAt < CACHE_TTL_MS &&
         cur.ids.length > 0
@@ -97,7 +100,7 @@ export function useModels(): UseModelsReturn {
     async (provider: StaticProviderId) => {
       // 重置整个 provider 状态(loading/error/ids/fetchedAt 全清),让下次 fetch 重新走
       resetStore(provider);
-      await fetchProvider(provider);
+      await fetchProvider(provider, { force: true });
     },
     [resetStore, fetchProvider],
   );
@@ -139,6 +142,7 @@ export function useModels(): UseModelsReturn {
     fetchProvider,
     retry,
     clearError,
+    resetProvider: resetStore,
     isModelKnown,
     mergedByProvider,
   };

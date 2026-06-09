@@ -8,14 +8,14 @@
  * - 暴露 { send, cancel, isStreaming, error },messages 由组件自己 selector
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 
 import { useChatStore } from '@/stores/chat';
 import { useConversationsStore } from '@/stores/conversations';
 import { useSettingsStore } from '@/stores/settings';
 import {
-  getCustomProvider,
-  listEnabledCustomProviders,
+  getFirstEnabledCustomModel,
+  resolveCustomModelSelection,
 } from '@/stores/customProviders';
 import { useToolsStore } from '@/stores/tools';
 import { now, uuid } from '@/lib/utils';
@@ -25,7 +25,6 @@ import { conversationApi, messageApi } from '@/lib/db';
 import {
   getModelInfo,
   getProviderOfModel,
-  isCustomProviderId,
   resolveConfiguredModel,
 } from '@/types/providers';
 import type { ChatMessage, ContentBlock, Usage } from '@/types/claude';
@@ -50,25 +49,28 @@ interface ToolResult {
   is_error: boolean;
 }
 
+let activeAbortController: AbortController | null = null;
+let activeSending = false;
+
+/** 中断当前正在进行的聊天流。可从输入区、侧边栏等任意 UI 入口调用。 */
+export function cancelActiveChatStream(): void {
+  activeAbortController?.abort();
+  activeAbortController = null;
+  activeSending = false;
+  useChatStore.getState().setStreaming(false);
+}
+
 export function useChat() {
   // v1.3:细粒度 selector,避免整 store 订阅
   const isStreaming = useChatStore((s) => s.isStreaming);
   const error = useChatStore((s) => s.error);
 
-  const abortRef = useRef<AbortController | null>(null);
-  const sendingRef = useRef(false);
-
-  const cancel = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    sendingRef.current = false;
-    useChatStore.getState().setStreaming(false);
-  }, []);
+  const cancel = useCallback(() => cancelActiveChatStream(), []);
 
   const send = useCallback(async (opts: SendOptions) => {
     const text = opts.text.trim();
     if (!text) return;
-    if (sendingRef.current) {
+    if (activeSending) {
       throw new Error('正在处理上一条消息，请稍候');
     }
 
@@ -81,38 +83,38 @@ export function useChat() {
 
     const settings = useSettingsStore.getState();
     const configuredProviders = new Set(await listConfiguredProviders());
-    const enabledCustomProviders = listEnabledCustomProviders();
-    if (configuredProviders.size === 0 && enabledCustomProviders.length === 0) {
+    const firstCustomModel = getFirstEnabledCustomModel();
+    if (configuredProviders.size === 0 && !firstCustomModel) {
       const msg = '请先配置至少一个 Provider API Key';
       chatState.setError(msg);
       throw new Error(msg);
     }
 
     const preferredModel = opts.model ?? conv?.model ?? settings.defaultModel;
-    const preferredCustomProvider = isCustomProviderId(preferredModel)
-      ? getCustomProvider(preferredModel)
-      : null;
-    const model =
-      preferredCustomProvider?.enabled
-        ? preferredCustomProvider.id
-        : resolveConfiguredModel(preferredModel, configuredProviders) ??
-          enabledCustomProviders[0]?.id ??
-          null;
-    if (!model) {
+    const preferredCustomModel = resolveCustomModelSelection(preferredModel);
+    const staticModel = preferredCustomModel
+      ? null
+      : resolveConfiguredModel(preferredModel, configuredProviders);
+    const selectedCustomModel = preferredCustomModel ?? (staticModel ? null : firstCustomModel);
+    const conversationModel = selectedCustomModel?.modelId ?? staticModel;
+    if (!conversationModel) {
       const msg = '请先配置至少一个 Provider API Key';
       chatState.setError(msg);
       throw new Error(msg);
     }
-    if (model !== settings.defaultModel && !opts.model && !conv) {
-      settings.setDefaultModel(model);
+    if (conversationModel !== settings.defaultModel && !opts.model && !conv) {
+      settings.setDefaultModel(conversationModel);
     }
 
-    const modelInfo = getModelInfo(model);
-    const customProvider = isCustomProviderId(model) ? getCustomProvider(model) : null;
-    const provider = customProvider?.id ?? (modelInfo ? modelInfo.provider : getProviderOfModel(model));
+    const requestModel = selectedCustomModel?.rawModelId ?? conversationModel;
+    const modelInfo = selectedCustomModel ? null : getModelInfo(conversationModel);
+    const customProvider = selectedCustomModel?.provider ?? null;
+    const provider =
+      selectedCustomModel?.providerId ??
+      (modelInfo ? modelInfo.provider : getProviderOfModel(conversationModel));
     if (!provider) {
-      chatState.setError(`未知模型: ${model}`);
-      throw new Error(`未知模型: ${model}`);
+      chatState.setError(`未知模型: ${conversationModel}`);
+      throw new Error(`未知模型: ${conversationModel}`);
     }
 
     let apiKey: string;
@@ -128,7 +130,7 @@ export function useChat() {
     if (!conv) {
       const created = await conversationApi.create({
         title: text.slice(0, 20),
-        model,
+        model: conversationModel,
         system_prompt: opts.system ?? null,
         thinking_enabled: opts.thinkingEnabled ?? settings.defaultThinkingEnabled,
         thinking_budget: opts.thinkingBudget ?? settings.defaultThinkingBudget,
@@ -140,13 +142,13 @@ export function useChat() {
       conv = created;
     } else if (
       opts.model ||
-      model !== conv.model ||
+      conversationModel !== conv.model ||
       opts.system !== undefined ||
       opts.thinkingEnabled !== undefined ||
       opts.thinkingBudget !== undefined
     ) {
       const patch: Parameters<typeof conversationApi.update>[0] = { id: conv.id };
-      if (opts.model || model !== conv.model) patch.model = model;
+      if (opts.model || conversationModel !== conv.model) patch.model = conversationModel;
       if (opts.system !== undefined) patch.system_prompt = opts.system;
       if (opts.thinkingEnabled !== undefined) patch.thinking_enabled = opts.thinkingEnabled;
       if (opts.thinkingBudget !== undefined) patch.thinking_budget = opts.thinkingBudget;
@@ -156,7 +158,7 @@ export function useChat() {
       conv = refreshed;
     }
 
-    sendingRef.current = true;
+    activeSending = true;
     useChatStore.getState().setStreaming(true);
     useChatStore.getState().setError(null);
 
@@ -194,7 +196,7 @@ export function useChat() {
 
     const enabledTools = filterEnabled(useToolsStore.getState().disabled);
     const controller = new AbortController();
-    abortRef.current = controller;
+    activeAbortController = controller;
 
     // 4. 订阅 event 流
     let lastAssistantId: string | null = null;
@@ -203,7 +205,7 @@ export function useChat() {
       const gen = runChatTurn({
         provider,
         apiKey,
-        model,
+        model: requestModel,
         system,
         thinking,
         maxTokens: resolveMaxTokens(provider, thinking),
@@ -244,7 +246,7 @@ export function useChat() {
                     thinking: t,
                     tool_calls: toolCalls,
                     tool_results: null,
-                    model,
+                    model: conversationModel,
                     usage: lastUsage ? JSON.stringify(lastUsage) : null,
                   }),
                 )
@@ -269,8 +271,10 @@ export function useChat() {
           .updateMessage(lastAssistantId, (m) => ({ ...m, streaming: false }));
       }
     } finally {
-      sendingRef.current = false;
-      abortRef.current = null;
+      activeSending = false;
+      if (activeAbortController === controller) {
+        activeAbortController = null;
+      }
       useChatStore.getState().setStreaming(false);
       // 触发 session 列表 updated_at 刷新
       if (conversationId) {
@@ -291,7 +295,7 @@ export function useChat() {
  * 把 engine event 翻译成 store 副作用。
  * 抽成单独函数,便于单测 + 主流程更线性。
  */
-async function handleEngineEvent(
+export async function handleEngineEvent(
   ev: EngineEvent,
   hooks: {
     onToolResult: (tr: ToolResult) => void;
@@ -382,6 +386,15 @@ async function handleEngineEvent(
       return;
     }
     case 'error': {
+      const streamingAssistant = [...store.messages]
+        .reverse()
+        .find((message) => message.role === 'assistant' && message.streaming);
+      if (streamingAssistant) {
+        store.updateMessage(streamingAssistant.id, (message) => ({
+          ...message,
+          streaming: false,
+        }));
+      }
       store.setError(ev.message);
       return;
     }

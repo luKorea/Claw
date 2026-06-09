@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  CheckSquareIcon,
   MessagesSquareIcon,
   MoreHorizontalIcon,
   PencilIcon,
+  SquareIcon,
   Trash2Icon,
 } from 'lucide-react';
 
@@ -37,7 +39,11 @@ interface ItemProps {
   title: string;
   updatedAt: number;
   active: boolean;
+  selectionMode: boolean;
+  selected: boolean;
+  disabledSelection: boolean;
   onSelect: () => void;
+  onToggleSelected: () => void;
   onRename: (newTitle: string) => void;
   onDelete: () => void;
 }
@@ -46,7 +52,11 @@ function ConversationItem({
   title,
   updatedAt,
   active,
+  selectionMode,
+  selected,
+  disabledSelection,
   onSelect,
+  onToggleSelected,
   onRename,
   onDelete,
 }: ItemProps) {
@@ -63,6 +73,24 @@ function ConversationItem({
           : 'border-transparent hover:bg-secondary',
       )}
     >
+      {selectionMode && (
+        <button
+          type="button"
+          className="flex size-6 shrink-0 items-center justify-center text-muted-foreground"
+          disabled={disabledSelection}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleSelected();
+          }}
+        >
+          {selected ? (
+            <CheckSquareIcon className="size-4 text-primary" />
+          ) : (
+            <SquareIcon className="size-4" />
+          )}
+        </button>
+      )}
+
       {editing ? (
         <Input
           autoFocus
@@ -85,7 +113,7 @@ function ConversationItem({
         />
       ) : (
         <button
-          onClick={onSelect}
+          onClick={selectionMode ? onToggleSelected : onSelect}
           className="flex min-w-0 flex-1 flex-col items-start text-left"
         >
           <span className="w-full truncate">{title}</span>
@@ -95,6 +123,7 @@ function ConversationItem({
         </button>
       )}
 
+      {!selectionMode && (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -124,6 +153,7 @@ function ConversationItem({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      )}
 
       <ConfirmDialog
         open={confirmDeleteOpen}
@@ -145,6 +175,20 @@ export function ConversationList() {
   // 切换会话时的中断确认弹窗(单一 state 服务整侧栏,任一会话点击都会触发)
   const [confirmSwitchOpen, setConfirmSwitchOpen] = useState(false);
   const [pendingSelect, setPendingSelect] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [confirmBulkDeleteOpen, setConfirmBulkDeleteOpen] = useState(false);
+  const selectedList = useMemo(() => Array.from(selectedIds), [selectedIds]);
+  const allCurrentSelected =
+    conv.list.length > 0 && conv.list.every((item) => selectedIds.has(item.id));
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const existing = new Set(conv.list.map((item) => item.id));
+      const next = new Set([...prev].filter((id) => existing.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [conv.list]);
 
   if (conv.list.length === 0) {
     return (
@@ -167,22 +211,85 @@ export function ConversationList() {
     void conv.selectConversation(id);
   };
 
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      if (allCurrentSelected) return new Set();
+      return new Set([...prev, ...conv.list.map((item) => item.id)]);
+    });
+  };
+
   return (
-    <ScrollArea className="flex-1">
-      <div className="space-y-0.5 px-2">
-        {conv.list.map((c) => (
-          <ConversationItem
-            key={c.id}
-            id={c.id}
-            title={c.title}
-            updatedAt={c.updated_at}
-            active={conv.currentId === c.id}
-            onSelect={() => requestSelect(c.id)}
-            onRename={(newTitle) => conv.update({ id: c.id, title: newTitle })}
-            onDelete={() => conv.remove(c.id)}
-          />
-        ))}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-1 px-2 py-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          disabled={isStreaming}
+          onClick={() => {
+            setSelectionMode((value) => !value);
+            setSelectedIds(new Set());
+          }}
+        >
+          {selectionMode ? '取消' : '选择'}
+        </Button>
+        {selectionMode && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={isStreaming}
+              onClick={toggleSelectAll}
+            >
+              {allCurrentSelected ? '取消全选' : '全选'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto h-7 px-2 text-xs text-destructive hover:text-destructive"
+              disabled={isStreaming || selectedIds.size === 0}
+              onClick={() => setConfirmBulkDeleteOpen(true)}
+            >
+              <Trash2Icon className="size-3.5" />
+              删除 {selectedIds.size}
+            </Button>
+          </>
+        )}
       </div>
+
+      <ScrollArea className="flex-1">
+        <div className="space-y-0.5 px-2">
+          {conv.list.map((c) => (
+            <ConversationItem
+              key={c.id}
+              id={c.id}
+              title={c.title}
+              updatedAt={c.updated_at}
+              active={conv.currentId === c.id}
+              selectionMode={selectionMode}
+              selected={selectedIds.has(c.id)}
+              disabledSelection={isStreaming}
+              onSelect={() => requestSelect(c.id)}
+              onToggleSelected={() => toggleSelected(c.id)}
+              onRename={(newTitle) => conv.update({ id: c.id, title: newTitle })}
+              onDelete={() => conv.remove(c.id)}
+            />
+          ))}
+        </div>
+      </ScrollArea>
 
       <ConfirmDialog
         open={confirmSwitchOpen}
@@ -198,6 +305,20 @@ export function ConversationList() {
           setPendingSelect(null);
         }}
       />
-    </ScrollArea>
+
+      <ConfirmDialog
+        open={confirmBulkDeleteOpen}
+        onOpenChange={setConfirmBulkDeleteOpen}
+        title={`删除 ${selectedIds.size} 个会话`}
+        description="选中的会话和消息都会被删除，此操作不可撤销。"
+        confirmText="删除"
+        destructive
+        onConfirm={async () => {
+          await conv.removeMany(selectedList);
+          setSelectedIds(new Set());
+          setSelectionMode(false);
+        }}
+      />
+    </div>
   );
 }

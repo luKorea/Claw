@@ -10,7 +10,10 @@ import {
   getFirstModelForProvider,
   getModelInfo,
   getProviderOfModel,
+  isCustomModelId,
   listModelsByProvider,
+  makeCustomModelId,
+  parseCustomModelId,
   resolveConfiguredModel,
 } from '@/types/providers';
 
@@ -149,6 +152,22 @@ describe('types/providers', () => {
     it('指向 minimaxi 系列默认', () => {
       expect(DEFAULT_MODEL_ID).toBe('MiniMax-M2.7');
       expect(getProviderOfModel(DEFAULT_MODEL_ID)).toBe('minimaxi');
+    });
+  });
+
+  describe('custom model id helpers', () => {
+    it('编码并解析包含特殊字符的 raw model id', () => {
+      const id = makeCustomModelId('custom:proxy_1', 'openai/gpt-4.1:latest');
+      expect(isCustomModelId(id)).toBe(true);
+      expect(parseCustomModelId(id)).toEqual({
+        providerId: 'custom:proxy_1',
+        rawModelId: 'openai/gpt-4.1:latest',
+      });
+    });
+
+    it('非法 custom model id 返回 null', () => {
+      expect(parseCustomModelId('custom-model:bad')).toBeNull();
+      expect(parseCustomModelId('custom:proxy_1')).toBeNull();
     });
   });
 });

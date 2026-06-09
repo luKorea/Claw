@@ -6,9 +6,11 @@ import {
   deleteApiKey,
   getApiKey,
   getApiKeyStatus,
+  listApiKeyStatuses,
   listConfiguredProviders,
   listProviderModels,
   setApiKey,
+  syncApiKeyStatus,
 } from '@/lib/keyring';
 import { ALL_PROVIDER_IDS } from '@/types/providers';
 
@@ -21,10 +23,47 @@ describe('lib/keyring', () => {
 
   describe('wrapper invoke 参数', () => {
     it('getApiKeyStatus → invoke("get_api_key_status", { provider })', async () => {
-      mockedInvoke.mockResolvedValueOnce({ configured: true, preview: 'sk-…1234' });
+      mockedInvoke.mockResolvedValueOnce({
+        configured: true,
+        preview: 'sk-…1234',
+        metadataKnown: true,
+      });
       const r = await getApiKeyStatus('anthropic');
-      expect(r).toEqual({ configured: true, preview: 'sk-…1234' });
+      expect(r).toEqual({
+        configured: true,
+        preview: 'sk-…1234',
+        metadataKnown: true,
+      });
       expect(mockedInvoke).toHaveBeenCalledWith('get_api_key_status', { provider: 'anthropic' });
+    });
+
+    it('syncApiKeyStatus → invoke("sync_api_key_status", { provider })', async () => {
+      mockedInvoke.mockResolvedValueOnce({
+        configured: true,
+        preview: 'sk-…5678',
+        metadataKnown: true,
+      });
+      const r = await syncApiKeyStatus('deepseek');
+      expect(r).toEqual({
+        configured: true,
+        preview: 'sk-…5678',
+        metadataKnown: true,
+      });
+      expect(mockedInvoke).toHaveBeenCalledWith('sync_api_key_status', {
+        provider: 'deepseek',
+      });
+    });
+
+    it('listApiKeyStatuses → invoke("list_api_key_statuses") 并过滤未知 provider', async () => {
+      mockedInvoke.mockResolvedValueOnce({
+        anthropic: { configured: true, preview: 'sk-…1234', metadataKnown: true },
+        unknown: { configured: true, preview: '…xxxx', metadataKnown: true },
+      });
+      const r = await listApiKeyStatuses();
+      expect(r).toEqual({
+        anthropic: { configured: true, preview: 'sk-…1234', metadataKnown: true },
+      });
+      expect(mockedInvoke).toHaveBeenCalledWith('list_api_key_statuses');
     });
 
     it('setApiKey → invoke("set_api_key", { provider, apiKey })', async () => {

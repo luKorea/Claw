@@ -56,6 +56,7 @@ export function useConversations() {
   const upsertStore = useConversationsStore((s) => s.upsert);
   const patchLocalStore = useConversationsStore((s) => s.patchLocal);
   const removeStore = useConversationsStore((s) => s.remove);
+  const removeManyStore = useConversationsStore((s) => s.removeMany);
   const setCurrentStore = useConversationsStore((s) => s.setCurrent);
 
   // v1.3:跨 store 拆 selector,避免 useChatStore() 裸订阅
@@ -140,6 +141,18 @@ export function useConversations() {
     [removeStore, clearChat, currentId],
   );
 
+  const removeMany = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      await conversationApi.removeMany(ids);
+      removeManyStore(ids);
+      if (currentId && ids.includes(currentId)) {
+        clearChat();
+      }
+    },
+    [removeManyStore, clearChat, currentId],
+  );
+
   return {
     list,
     currentId,
@@ -150,6 +163,7 @@ export function useConversations() {
     createNew,
     update,
     remove,
+    removeMany,
   };
 }
 

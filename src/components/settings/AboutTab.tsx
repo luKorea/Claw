@@ -25,7 +25,7 @@ export function AboutTab() {
       </div>
       <p className="text-muted-foreground">
         支持 Anthropic / DeepSeek / OpenAI / MiniMax。
-        本地存储所有数据,API Key 通过操作系统 Keychain 管理。
+        本地存储所有数据,API Key 保存在本机 Claw 配置文件中。
       </p>
       <p className="text-muted-foreground">
         使用 Tauri 2 + React 19 + TypeScript 构建。

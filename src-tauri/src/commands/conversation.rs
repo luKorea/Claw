@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{FromRow, SqlitePool};
 
 use crate::db;
 use crate::error::{AppError, AppResult};
@@ -191,6 +191,24 @@ pub async fn delete_conversation(id: String) -> AppResult<()> {
     Ok(())
 }
 
+pub async fn delete_many(pool: &SqlitePool, ids: &[String]) -> AppResult<()> {
+    let mut tx = pool.begin().await?;
+    for id in ids {
+        sqlx::query("DELETE FROM conversations WHERE id = ?1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_conversations(ids: Vec<String>) -> AppResult<()> {
+    let pool = db::pool()?;
+    delete_many(&pool, &ids).await
+}
+
 #[tauri::command]
 pub async fn list_messages(conversation_id: String) -> AppResult<Vec<Message>> {
     let pool = db::pool()?;
@@ -258,4 +276,75 @@ pub async fn delete_message(id: String) -> AppResult<()> {
         .execute(&pool)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let url = format!("sqlite://{}?mode=rwc", db_path.display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        let init_sql = include_str!("../db/migrations/0001_init.sql");
+        sqlx::query(init_sql).execute(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    async fn insert_conversation(pool: &SqlitePool, id: &str) {
+        sqlx::query(
+            "INSERT INTO conversations
+             (id, title, model, system_prompt, thinking_enabled, thinking_budget, created_at, updated_at)
+             VALUES (?1, 'title', 'MiniMax-M2.7', NULL, 0, NULL, 1, 1)",
+        )
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_message(pool: &SqlitePool, id: &str, conversation_id: &str) {
+        sqlx::query(
+            "INSERT INTO messages
+             (id, conversation_id, parent_id, role, content, thinking, tool_calls, tool_results, model, usage, created_at)
+             VALUES (?1, ?2, NULL, 'user', '[]', NULL, NULL, NULL, NULL, NULL, 1)",
+        )
+        .bind(id)
+        .bind(conversation_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_many_removes_conversations_and_cascades_messages() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_conversation(&pool, "c1").await;
+        insert_conversation(&pool, "c2").await;
+        insert_conversation(&pool, "c3").await;
+        insert_message(&pool, "m1", "c1").await;
+        insert_message(&pool, "m2", "c2").await;
+
+        delete_many(&pool, &["c1".to_string(), "c2".to_string()])
+            .await
+            .unwrap();
+
+        let remaining_conversations: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM conversations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let remaining_messages: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(remaining_conversations, 1);
+        assert_eq!(remaining_messages, 0);
+    }
 }

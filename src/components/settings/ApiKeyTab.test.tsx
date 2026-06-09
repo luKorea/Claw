@@ -7,6 +7,7 @@ import type { ApiKeyState } from '@/hooks/useSettings';
 const modelMocks = vi.hoisted(() => ({
   fetchProvider: vi.fn(),
   retry: vi.fn(),
+  resetProvider: vi.fn(),
 }));
 
 vi.mock('@/hooks/useModels', () => ({
@@ -14,12 +15,14 @@ vi.mock('@/hooks/useModels', () => ({
   useModels: () => ({
     fetchProvider: modelMocks.fetchProvider,
     retry: modelMocks.retry,
+    resetProvider: modelMocks.resetProvider,
   }),
 }));
 
 const state: ApiKeyState = {
   configured: false,
   preview: null,
+  metadataKnown: true,
   loading: false,
   saving: false,
   error: null,
@@ -29,6 +32,7 @@ describe('components/settings/ApiKeyTab ProviderKeyCard', () => {
   beforeEach(() => {
     modelMocks.fetchProvider.mockReset();
     modelMocks.retry.mockReset();
+    modelMocks.resetProvider.mockReset();
   });
 
   it('MiniMax Key 提示使用 sk-cp- 前缀', () => {
@@ -39,6 +43,7 @@ describe('components/settings/ApiKeyTab ProviderKeyCard', () => {
         onSave={vi.fn()}
         onRemove={vi.fn()}
         onRefresh={vi.fn()}
+        onSync={vi.fn()}
       />,
     );
 
@@ -55,6 +60,7 @@ describe('components/settings/ApiKeyTab ProviderKeyCard', () => {
         onSave={onSave}
         onRemove={vi.fn()}
         onRefresh={vi.fn()}
+        onSync={vi.fn()}
       />,
     );
 
@@ -76,6 +82,7 @@ describe('components/settings/ApiKeyTab ProviderKeyCard', () => {
         onSave={onSave}
         onRemove={vi.fn()}
         onRefresh={vi.fn()}
+        onSync={vi.fn()}
       />,
     );
 
@@ -85,6 +92,45 @@ describe('components/settings/ApiKeyTab ProviderKeyCard', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith('sk-proj-test'));
-    expect(modelMocks.fetchProvider).toHaveBeenCalledWith('openai');
+    expect(modelMocks.fetchProvider).toHaveBeenCalledWith('openai', { force: true });
+  });
+
+  it('删除 Key 后清空对应 provider 模型缓存', async () => {
+    const onRemove = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProviderKeyCard
+        provider="deepseek"
+        state={{ ...state, configured: true }}
+        onSave={vi.fn()}
+        onRemove={onRemove}
+        onRefresh={vi.fn()}
+        onSync={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '清除' }));
+    fireEvent.click(await screen.findByRole('button', { name: '删除' }));
+
+    await waitFor(() => expect(onRemove).toHaveBeenCalled());
+    expect(modelMocks.resetProvider).toHaveBeenCalledWith('deepseek');
+  });
+
+  it('未知元数据状态时展示导入旧 Key 操作', async () => {
+    const onSync = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProviderKeyCard
+        provider="anthropic"
+        state={{ ...state, metadataKnown: false }}
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+        onRefresh={vi.fn()}
+        onSync={onSync}
+      />,
+    );
+
+    expect(screen.getByText('可导入旧 Key')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '导入旧 Key' }));
+
+    await waitFor(() => expect(onSync).toHaveBeenCalled());
   });
 });

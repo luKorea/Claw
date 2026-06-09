@@ -2,18 +2,18 @@
 
 > 多 Provider AI 桌面客户端 · Tauri 2 + React 19 + TypeScript
 
-一个面向个人使用的多 Provider AI 桌面聊天客户端，支持 Anthropic / DeepSeek / OpenAI / MiniMax、多模型切换、思考模式、流式输出、Markdown 渲染、会话历史、系统提示词预设、文件工具。
+一个面向个人使用的多 Provider AI 桌面聊天客户端，支持 Anthropic / DeepSeek / OpenAI / MiniMax、自定义兼容模型、多模型切换、思考模式、流式输出、Markdown 渲染、会话历史、系统提示词预设、文件工具。
 
 ## ✨ 功能
 
-- 🧠 **多 Provider / 多模型**：Anthropic / DeepSeek / OpenAI / MiniMax 模型切换
+- 🧠 **多 Provider / 多模型**：Anthropic / DeepSeek / OpenAI / MiniMax / 自定义兼容模型切换
 - 💭 **扩展思考**（Extended Thinking）：可调预算的深度思考
-- ⚡ **流式输出**：基于 Anthropic SDK / OpenAI 兼容 SSE，逐块渲染
+- ⚡ **流式输出**：基于 Anthropic SDK / OpenAI 兼容 SSE / Tauri Rust 桥接，逐块渲染
 - 📝 **Markdown + 数学公式**：GFM 表格、任务列表、KaTeX 公式
 - 💾 **本地持久化**：SQLite 存会话、消息、提示词预设
-- 🔐 **API Key 安全**：写入操作系统 Keychain（macOS Keychain / Windows Credential Manager / Linux Secret Service）
+- 🔐 **API Key 本机配置**：写入本机 `app_data_dir/claw.db`，不进入前端 localStorage 或日志
 - 📋 **系统提示词**：内置 4 个预设，支持自定义与变量占位
-- 🛠️ **工具调用**：内置 `read_file` / `list_dir` / `write_file`，可启用 / 禁用
+- 🛠️ **多轮工具调用**：内置 `read_file` / `list_dir` / `write_file`，可启用 / 禁用，工具结果会回传模型继续推理
 - ⌨️ **快捷键**：`⌘+N` 新建、`⌘+,` 设置、`Esc` 停止
 
 ## 🛠️ 技术栈
@@ -38,7 +38,7 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
-首次启动会引导你配置默认模型对应 Provider 的 API Key（写入 OS Keychain）。
+首次启动会引导你配置默认模型对应 Provider 的 API Key（写入本机 Claw 配置文件）。
 
 ## 📁 项目结构
 
@@ -51,14 +51,14 @@ src/
 │   ├── settings/            # 设置
 │   └── prompts/             # 提示词管理
 ├── hooks/                   # useChat / useSettings / useConversations / usePrompts
-├── lib/                     # anthropic / streaming / keyring / db / tools / prompts
+├── lib/                     # providers / streaming / keyring / db / tools / prompts
 ├── stores/                  # Zustand stores
 ├── styles/                  # Tailwind 入口
 └── types/                   # 共享类型
 
 src-tauri/
 ├── src/
-│   ├── commands/            # Tauri commands（keyring / db / tools）
+│   ├── commands/            # Tauri commands（keyring / db / tools / provider bridge）
 │   ├── db/                  # SQLite 池 + 迁移
 │   └── ...
 ├── capabilities/            # 权限声明
@@ -66,11 +66,20 @@ src-tauri/
 └── tauri.conf.json
 ```
 
-## 🔑 API Key 安全
+## 🔑 API Key 本机配置
 
-- Key 写入 OS Keychain，前端只持有 Keychain 的"存在性 + 预览（sk-…1234）"。
-- 实际请求时通过 Tauri command 临时取出，用完即丢。
-- 任何 Tauri 外的进程（包括其他应用）都拿不到明文 Key。
+- Key 写入本机 `app_data_dir/claw.db` 的 `api_keys` 表；脱敏预览（sk-…1234）只用于 UI 状态展示。
+- 打开应用、打开设置、获取模型和发送消息不再读取系统 Keychain，避免 macOS 本机密码反复弹窗。
+- 旧版本保存在 Keychain 的 Key 不会自动扫描；可在设置页点击“导入旧 Key”手动迁移一次。
+- 前端不把明文 Key 写入 localStorage、README、日志或错误信息。
+- 自定义 Provider 配置同样存入 SQLite，可通过“获取模型”拉取并保存多个可选模型；聊天支持自动/流式/非流式模式，并提供“测试聊天”诊断入口。
+
+## 🔌 Provider
+
+- 内置 Provider：Anthropic / DeepSeek / OpenAI / MiniMax。
+- DeepSeek / OpenAI 走 OpenAI 兼容协议，MiniMax 走 Anthropic 兼容协议并通过 Rust command 桥接，避免 WebView CORS。
+- 自定义模型支持 OpenAI 兼容和 Anthropic 兼容接口；API Base URL 必须是 HTTPS，或本地 `localhost` HTTP。
+- DeepSeek / OpenAI 会尝试拉取 `/v1/models` 动态模型列表；Anthropic / MiniMax 使用内置模型列表。
 
 ## ✅ 验证
 
@@ -82,15 +91,15 @@ pnpm test:run
 pnpm build
 ```
 
-真实 Provider 联网冒烟测试需显式执行，会读取当前 Keychain / 环境变量中已配置的 Provider Key，并对每个 Provider 发送一条极短请求：
+真实 Provider 联网冒烟测试需显式执行，会读取环境变量或本机 `claw.db` 中已配置的 Provider Key，并对每个 Provider 发送一条极短请求：
 
 ```bash
 pnpm test:real-providers
 ```
 
 - 不会打印 API Key 或 Authorization header。
-- 默认读取 Keychain 服务 `com.claw.client` 下的 `api-key:{provider}`。
-- 读取逻辑复用 Rust `keyring` crate，和 Tauri 后端的 Keychain 规则一致。
+- 默认读取本机 `app_data_dir/claw.db`；也可通过 `CLAW_DB_PATH=/path/to/claw.db` 指定数据库。
+- 旧 Keychain 读取默认关闭；如需兼容旧安装，可设置 `CLAW_SMOKE_USE_KEYCHAIN=1`。
 - 也可用 `CLAW_DEEPSEEK_API_KEY` / `CLAW_OPENAI_API_KEY` / `CLAW_ANTHROPIC_API_KEY` / `CLAW_MINIMAXI_API_KEY` 临时覆盖。
 - 可用 `CLAW_SMOKE_PROVIDERS=deepseek,openai` 限定测试 Provider。
 - 未发现任何 Key 时退出码为 `2`；自动化环境可加 `CLAW_SMOKE_ALLOW_EMPTY=1` 将其视为跳过。
@@ -153,10 +162,14 @@ https://github.com/luKorea/Claw/releases
 
 ## 📝 路线图
 
+- [x] 多 Provider / 自定义 Provider
+- [x] MiniMax Rust 流式桥接
+- [x] 多轮工具调用
+- [x] GitHub Releases 多平台发布
+- [x] 真实 Provider 联网冒烟验证（DeepSeek 已通过；其他 Provider 按需验证）
 - [ ] MCP 集成（stdio / sse / http transport）
 - [ ] 项目级 context（`.claude` 文件夹）
-- [ ] 多轮工具调用
-- [ ] 工具结果可视化（图片、表格）
+- [ ] 富媒体工具结果可视化（图片、表格）
 - [ ] 云同步
 - [ ] 国际化
 

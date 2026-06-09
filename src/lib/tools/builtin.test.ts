@@ -31,6 +31,23 @@ describe('lib/tools/builtin', () => {
       expect(props.max_bytes?.minimum).toBe(1);
     });
 
+    it('read_file 明确提示目录应使用 list_dir', () => {
+      const rf = BUILTIN_TOOLS.find((t) => t.name === 'read_file') as ToolDefinition;
+      const props = rf.parameters.properties as Record<string, { description?: string }>;
+
+      expect(rf.description).toContain('目录必须改用 list_dir');
+      expect(props.path?.description).toContain('不要传目录');
+      expect(props.path?.description).toContain('$HOME');
+    });
+
+    it('list_dir 明确支持读取目录和 home 别名', () => {
+      const listDir = BUILTIN_TOOLS.find((t) => t.name === 'list_dir') as ToolDefinition;
+      const props = listDir.parameters.properties as Record<string, { description?: string }>;
+
+      expect(listDir.description).toContain('读取目录内容');
+      expect(props.path?.description).toContain('/home');
+    });
+
     it('tool name 唯一', () => {
       const names = BUILTIN_TOOLS.map((t) => t.name);
       expect(new Set(names).size).toBe(names.length);

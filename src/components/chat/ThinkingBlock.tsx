@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrainIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,10 @@ interface Props {
 
 export function ThinkingBlock({ text, streaming, defaultOpen = false }: Props) {
   const [open, setOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    if (defaultOpen) setOpen(true);
+  }, [defaultOpen]);
 
   return (
     <div

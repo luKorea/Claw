@@ -13,6 +13,7 @@ import type {
 import type {
   CustomProvider,
   CustomProviderProtocol,
+  CustomProviderStreamMode,
 } from '@/stores/customProviders';
 import type { ToolDefinition } from '@/types/tool';
 import type { Usage } from '@/types/claude';
@@ -30,9 +31,12 @@ type CustomProviderChannelEvent =
 interface CustomProviderInvokeInput {
   requestId: string;
   protocol: CustomProviderProtocol;
+  streamMode: CustomProviderStreamMode;
+  fallbackProtocol?: CustomProviderProtocol;
   baseUrl: string;
   apiKey: string;
   body: Record<string, unknown>;
+  fallbackBody?: Record<string, unknown>;
 }
 
 function makeRequestId(): string {
@@ -71,15 +75,25 @@ function toOpenAITool(d: ToolDefinition): {
   };
 }
 
-export function buildCustomProviderRequestBody(
+function alternateProtocol(
+  protocol: CustomProviderProtocol,
+): CustomProviderProtocol {
+  return protocol === 'openai-compatible'
+    ? 'anthropic-compatible'
+    : 'openai-compatible';
+}
+
+function buildCustomProviderRequestBodyForProtocol(
   provider: CustomProvider,
+  protocol: CustomProviderProtocol,
   req: AdapterRequest,
 ): Record<string, unknown> {
-  if (provider.protocol === 'anthropic-compatible') {
+  const model = req.model || provider.selectedModelId;
+  if (protocol === 'anthropic-compatible') {
     const body: Record<string, unknown> = {
-      model: provider.modelId,
+      model,
       max_tokens: resolveAnthropicMaxTokens(req.thinking),
-      stream: true,
+      stream: provider.streamMode !== 'non-stream',
       messages: toAnthropicMessages(req.messages),
     };
     if (req.system) body.system = req.system;
@@ -92,17 +106,33 @@ export function buildCustomProviderRequestBody(
     return body;
   }
 
+  const messages = toOAIMessages(req.messages);
+  if (
+    req.system?.trim() &&
+    !messages.some((message) => message.role === 'system')
+  ) {
+    messages.unshift({ role: 'system', content: req.system.trim() });
+  }
   const body: Record<string, unknown> = {
-    model: provider.modelId,
-    messages: toOAIMessages(req.messages),
+    model,
+    messages,
     max_tokens: req.max_tokens,
-    stream: true,
-    stream_options: { include_usage: true },
+    stream: provider.streamMode !== 'non-stream',
   };
+  if (provider.streamMode !== 'non-stream') {
+    body.stream_options = { include_usage: true };
+  }
   if (req.tools && req.tools.length > 0 && provider.supportsTools) {
     body.tools = req.tools.map(toOpenAITool);
   }
   return body;
+}
+
+export function buildCustomProviderRequestBody(
+  provider: CustomProvider,
+  req: AdapterRequest,
+): Record<string, unknown> {
+  return buildCustomProviderRequestBodyForProtocol(provider, provider.protocol, req);
 }
 
 function channelEventToAdapterEvent(message: CustomProviderChannelEvent): AdapterEvent {
@@ -229,16 +259,28 @@ export class CustomProviderAdapter implements ProviderAdapter {
 
   stream(req: AdapterRequest, apiKey: string, signal: AbortSignal): AsyncIterable<AdapterEvent> {
     if (!apiKey) throw new Error(`缺少 ${this.provider.name} API Key`);
+    const fallbackProtocol =
+      this.provider.streamMode === 'auto'
+        ? alternateProtocol(this.provider.protocol)
+        : undefined;
     return streamViaTauri(
       {
         requestId: makeRequestId(),
         protocol: this.provider.protocol,
+        streamMode: this.provider.streamMode,
+        fallbackProtocol,
         baseUrl: this.provider.baseUrl,
         apiKey,
         body: buildCustomProviderRequestBody(this.provider, req),
+        fallbackBody: fallbackProtocol
+          ? buildCustomProviderRequestBodyForProtocol(
+              this.provider,
+              fallbackProtocol,
+              req,
+            )
+          : undefined,
       },
       signal,
     );
   }
 }
-

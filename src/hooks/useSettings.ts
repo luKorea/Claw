@@ -1,40 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import { useSettingsStore } from '@/stores/settings';
+import { useProviderKeysStore, type ProviderKeyState } from '@/stores/providerKeys';
 import {
   ALL_PROVIDER_IDS,
   type StaticProviderId,
 } from '@/types/providers';
-import {
-  deleteApiKey,
-  getApiKeyStatus,
-  setApiKey as keyringSetKey,
-} from '@/lib/keyring';
 // applyTheme 是独立工具函数(非 store 字段),App.tsx 自行 import 使用
 
-export interface ApiKeyState {
-  configured: boolean;
-  preview: string | null;
-  loading: boolean;
-  saving: boolean;
-  error: string | null;
-}
-
-type ApiKeyStateMap = Record<StaticProviderId, ApiKeyState>;
-
-const initialKeyState: ApiKeyState = {
-  configured: false,
-  preview: null,
-  loading: true,
-  saving: false,
-  error: null,
-};
-
-function makeInitialMap(): ApiKeyStateMap {
-  return Object.fromEntries(
-    ALL_PROVIDER_IDS.map((p) => [p, { ...initialKeyState }]),
-  ) as ApiKeyStateMap;
-}
+export type ApiKeyState = ProviderKeyState;
 
 /**
  * 统一管理全局设置 + 多 Provider API Key 状态。
@@ -75,135 +49,17 @@ export function useSettings() {
     ],
   );
 
-  const [keys, setKeys] = useState<ApiKeyStateMap>(makeInitialMap);
-
-  const refreshAll = useCallback(async () => {
-    // 先全部 loading
-    setKeys((prev) => {
-      const next = { ...prev };
-      for (const p of ALL_PROVIDER_IDS) {
-        next[p] = { ...next[p], loading: true, error: null };
-      }
-      return next;
-    });
-    // 并行查 status
-    const results = await Promise.all(
-      ALL_PROVIDER_IDS.map(async (p) => {
-        try {
-          const s = await getApiKeyStatus(p);
-          return { p, status: s, error: null };
-        } catch (err) {
-          return {
-            p,
-            status: null,
-            error: err instanceof Error ? err.message : String(err),
-          };
-        }
-      }),
-    );
-    setKeys((prev) => {
-      const next = { ...prev };
-      for (const r of results) {
-        const cur = next[r.p];
-        if (r.status) {
-          next[r.p] = {
-            configured: r.status.configured,
-            preview: r.status.preview,
-            loading: false,
-            saving: false,
-            error: null,
-          };
-        } else {
-          next[r.p] = {
-            configured: cur?.configured ?? false,
-            preview: cur?.preview ?? null,
-            loading: false,
-            saving: false,
-            error: r.error,
-          };
-        }
-      }
-      return next;
-    });
-  }, []);
+  const keys = useProviderKeysStore((s) => s.keys);
+  const keysInitialized = useProviderKeysStore((s) => s.initialized);
+  const refreshAll = useProviderKeysStore((s) => s.refreshAll);
+  const refreshOne = useProviderKeysStore((s) => s.refreshOne);
+  const syncOne = useProviderKeysStore((s) => s.syncOne);
+  const saveKey = useProviderKeysStore((s) => s.saveKey);
+  const removeKey = useProviderKeysStore((s) => s.removeKey);
 
   useEffect(() => {
-    refreshAll();
-  }, [refreshAll]);
-
-  const refreshOne = useCallback(async (provider: StaticProviderId) => {
-    setKeys((prev) => ({ ...prev, [provider]: { ...prev[provider], loading: true, error: null } }));
-    try {
-      const s = await getApiKeyStatus(provider);
-      setKeys((prev) => ({
-        ...prev,
-        [provider]: {
-          configured: s.configured,
-          preview: s.preview,
-          loading: false,
-          saving: false,
-          error: null,
-        },
-      }));
-    } catch (err) {
-      setKeys((prev) => ({
-        ...prev,
-        [provider]: {
-          ...prev[provider],
-          loading: false,
-          error: err instanceof Error ? err.message : String(err),
-        },
-      }));
-    }
-  }, []);
-
-  const saveKey = useCallback(
-    async (provider: StaticProviderId, key: string) => {
-      setKeys((prev) => ({
-        ...prev,
-        [provider]: { ...prev[provider], saving: true, error: null },
-      }));
-      try {
-        await keyringSetKey(provider, key);
-        await refreshOne(provider);
-      } catch (err) {
-        setKeys((prev) => ({
-          ...prev,
-          [provider]: {
-            ...prev[provider],
-            saving: false,
-            error: err instanceof Error ? err.message : String(err),
-          },
-        }));
-        throw err;
-      }
-    },
-    [refreshOne],
-  );
-
-  const removeKey = useCallback(
-    async (provider: StaticProviderId) => {
-      setKeys((prev) => ({
-        ...prev,
-        [provider]: { ...prev[provider], saving: true, error: null },
-      }));
-      try {
-        await deleteApiKey(provider);
-        await refreshOne(provider);
-      } catch (err) {
-        setKeys((prev) => ({
-          ...prev,
-          [provider]: {
-            ...prev[provider],
-            saving: false,
-            error: err instanceof Error ? err.message : String(err),
-          },
-        }));
-        throw err;
-      }
-    },
-    [refreshOne],
-  );
+    if (!keysInitialized) void refreshAll();
+  }, [keysInitialized, refreshAll]);
 
   /** 同步拿已配置的 provider 集合(用于 UI 提示) */
   // v1.2 Bug 3.1:用 useMemo 锁住 Set 引用,避免每次 render 新建触发子组件 re-render
@@ -218,6 +74,7 @@ export function useSettings() {
     configuredProviders,          // Set<ProviderId>
     refreshAll,                   // 重新拉所有 provider 状态
     refreshOne,                   // 重新拉单个
+    syncOne,                      // 显式从旧 Keychain 导入
     saveKey,                      // (provider, key) => Promise<void>
     removeKey,                    // (provider) => Promise<void>
   };

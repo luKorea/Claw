@@ -7,22 +7,24 @@ vi.mock('@/hooks/useModels', () => ({
   useModels: vi.fn(),
 }));
 
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: vi.fn(),
-}));
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 
 import { useGroupedModels } from '@/hooks/useGroupedModels';
 import * as useModelsModule from '@/hooks/useModels';
-import * as useSettingsModule from '@/hooks/useSettings';
-import { useCustomProvidersStore } from '@/stores/customProviders';
+import {
+  resetCustomProvidersStoreForTest,
+  useCustomProvidersStore,
+} from '@/stores/customProviders';
 import { useModelsStore } from '@/stores/models';
-import { ALL_PROVIDER_IDS, type StaticProviderId } from '@/types/providers';
+import { useProviderKeysStore, type ProviderKeyState } from '@/stores/providerKeys';
+import {
+  ALL_PROVIDER_IDS,
+  MODEL_REGISTRY,
+  type StaticProviderId,
+} from '@/types/providers';
 
 const mockedUseModels = vi.mocked(useModelsModule.useModels);
-const mockedUseSettings = vi.mocked(useSettingsModule.useSettings);
 
 function freshByProvider() {
   return Object.fromEntries(
@@ -33,10 +35,36 @@ function freshByProvider() {
   );
 }
 
+function keyState(configured: boolean): ProviderKeyState {
+  return {
+    configured,
+    preview: configured ? '…test' : null,
+    metadataKnown: true,
+    loading: false,
+    saving: false,
+    error: null,
+  };
+}
+
+function setConfiguredProviders(providers: StaticProviderId[]) {
+  const configured = new Set(providers);
+  useProviderKeysStore.setState({
+    initialized: true,
+    keys: Object.fromEntries(
+      ALL_PROVIDER_IDS.map((provider) => [
+        provider,
+        keyState(configured.has(provider)),
+      ]),
+    ) as never,
+  });
+}
+
 describe('hooks/useGroupedModels', () => {
   beforeEach(() => {
     useModelsStore.setState({ byProvider: freshByProvider() as never });
-    useCustomProvidersStore.setState({ providers: [] });
+    resetCustomProvidersStoreForTest();
+    useCustomProvidersStore.setState({ hydrated: true });
+    setConfiguredProviders([]);
     mockedUseModels.mockReturnValue({
       ids: () => [],
       loading: () => false,
@@ -44,9 +72,10 @@ describe('hooks/useGroupedModels', () => {
       fetchProvider: vi.fn(),
       retry: vi.fn(),
       clearError: vi.fn(),
+      resetProvider: vi.fn(),
       isModelKnown: () => false,
       mergedByProvider: Object.fromEntries(
-        ALL_PROVIDER_IDS.map((p) => [p, [] as string[]]),
+        ALL_PROVIDER_IDS.map((p) => [p, MODEL_REGISTRY[p].map((model) => model.id)]),
       ) as Record<StaticProviderId, string[]>,
     });
   });
@@ -56,18 +85,14 @@ describe('hooks/useGroupedModels', () => {
   });
 
   it('空配置:无任何 provider 已配 → 返回空 grouped', () => {
-    mockedUseSettings.mockReturnValue({
-      configuredProviders: new Set<StaticProviderId>(),
-    } as never);
+    setConfiguredProviders([]);
 
     const { result } = renderHook(() => useGroupedModels());
     expect(result.current.grouped).toEqual({});
   });
 
   it('只配 anthropic:grouped["Anthropic"] 含全部 anthropic 硬编码模型', () => {
-    mockedUseSettings.mockReturnValue({
-      configuredProviders: new Set<StaticProviderId>(['anthropic']),
-    } as never);
+    setConfiguredProviders(['anthropic']);
 
     const { result } = renderHook(() => useGroupedModels());
     const anthropicGroup = result.current.grouped['Anthropic'] ?? [];
@@ -80,9 +105,7 @@ describe('hooks/useGroupedModels', () => {
   });
 
   it('配 openai:grouped["OpenAI"] 含 gpt-5 / gpt-4o', () => {
-    mockedUseSettings.mockReturnValue({
-      configuredProviders: new Set<StaticProviderId>(['openai']),
-    } as never);
+    setConfiguredProviders(['openai']);
 
     const { result } = renderHook(() => useGroupedModels());
     const openaiGroup = result.current.grouped['OpenAI'] ?? [];
@@ -91,9 +114,7 @@ describe('hooks/useGroupedModels', () => {
   });
 
   it('动态拉取到不存在的 id(仅 API 返回):归到同 provider 的 group', () => {
-    mockedUseSettings.mockReturnValue({
-      configuredProviders: new Set<StaticProviderId>(['openai']),
-    } as never);
+    setConfiguredProviders(['openai']);
     // 模拟动态拉取到 gpt-99-from-api(不在 ALL_MODELS)
     mockedUseModels.mockReturnValue({
       ids: () => [],
@@ -102,6 +123,7 @@ describe('hooks/useGroupedModels', () => {
       fetchProvider: vi.fn(),
       retry: vi.fn(),
       clearError: vi.fn(),
+      resetProvider: vi.fn(),
       isModelKnown: (id: string) => id === 'gpt-99-from-api',
       mergedByProvider: {
         anthropic: [],
@@ -121,9 +143,7 @@ describe('hooks/useGroupedModels', () => {
   });
 
   it('动态 + 硬编码混合:同一 provider 既有硬编码又有动态,都进同 group + 去重', () => {
-    mockedUseSettings.mockReturnValue({
-      configuredProviders: new Set<StaticProviderId>(['openai']),
-    } as never);
+    setConfiguredProviders(['openai']);
     mockedUseModels.mockReturnValue({
       ids: () => [],
       loading: () => false,
@@ -131,6 +151,7 @@ describe('hooks/useGroupedModels', () => {
       fetchProvider: vi.fn(),
       retry: vi.fn(),
       clearError: vi.fn(),
+      resetProvider: vi.fn(),
       isModelKnown: () => true,
       mergedByProvider: {
         anthropic: [],
@@ -148,16 +169,25 @@ describe('hooks/useGroupedModels', () => {
   });
 
   it('启用的自定义 provider 会进入自定义分组', () => {
-    mockedUseSettings.mockReturnValue({
-      configuredProviders: new Set<StaticProviderId>(),
-    } as never);
-    useCustomProvidersStore.getState().createProvider({
-      name: '本地模型',
-      protocol: 'openai-compatible',
-      baseUrl: 'http://localhost:11434/v1',
-      modelId: 'llama3',
-      supportsThinking: false,
-      supportsTools: false,
+    setConfiguredProviders([]);
+    useCustomProvidersStore.setState({
+      providers: [
+        {
+          id: 'custom:local_model',
+          name: '本地模型',
+          protocol: 'openai-compatible',
+          baseUrl: 'http://localhost:11434/v1',
+          modelIds: ['llama3'],
+          selectedModelId: 'llama3',
+          enabled: true,
+          supportsThinking: false,
+          supportsTools: false,
+          streamMode: 'auto',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      hydrated: true,
     });
 
     const { result } = renderHook(() => useGroupedModels());

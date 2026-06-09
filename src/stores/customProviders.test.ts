@@ -1,26 +1,84 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/customProviders', () => ({
+  listCustomProviders: vi.fn(),
+  createCustomProvider: vi.fn(),
+  updateCustomProvider: vi.fn(),
+  deleteCustomProvider: vi.fn(),
+}));
 
 import {
   customProviderToModelInfo,
   normalizeBaseUrl,
+  resetCustomProvidersStoreForTest,
   useCustomProvidersStore,
   validateCustomProviderInput,
+  type CustomProvider,
   type CustomProviderInput,
 } from '@/stores/customProviders';
+import {
+  createCustomProvider,
+  deleteCustomProvider,
+  listCustomProviders,
+  updateCustomProvider,
+} from '@/lib/customProviders';
+import type { CustomProviderId } from '@/types/providers';
 
 const VALID_INPUT: CustomProviderInput = {
   name: '公司网关',
   protocol: 'openai-compatible',
   baseUrl: 'https://api.example.com/v1/',
-  modelId: 'gpt-test',
+  modelIds: ['gpt-test'],
+  selectedModelId: 'gpt-test',
   supportsThinking: true,
   supportsTools: false,
+  streamMode: 'auto',
 };
+
+function makeProvider(
+  input: CustomProviderInput,
+  id: CustomProviderId = 'custom:mock_provider',
+): CustomProvider {
+  return {
+    id,
+    ...input,
+    name: input.name.trim(),
+    baseUrl: normalizeBaseUrl(input.baseUrl),
+    enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
+const mockedListCustomProviders = vi.mocked(listCustomProviders);
+const mockedCreateCustomProvider = vi.mocked(createCustomProvider);
+const mockedUpdateCustomProvider = vi.mocked(updateCustomProvider);
+const mockedDeleteCustomProvider = vi.mocked(deleteCustomProvider);
 
 describe('stores/customProviders', () => {
   beforeEach(() => {
     localStorage.clear();
-    useCustomProvidersStore.setState({ providers: [] });
+    resetCustomProvidersStoreForTest();
+    mockedListCustomProviders.mockReset();
+    mockedCreateCustomProvider.mockReset();
+    mockedUpdateCustomProvider.mockReset();
+    mockedDeleteCustomProvider.mockReset();
+    mockedListCustomProviders.mockResolvedValue([]);
+    mockedCreateCustomProvider.mockImplementation(async (input) =>
+      makeProvider(input, input.id ?? 'custom:mock_provider'),
+    );
+    mockedUpdateCustomProvider.mockImplementation(async (id, patch) => {
+      const current = useCustomProvidersStore
+        .getState()
+        .providers.find((provider) => provider.id === id);
+      if (!current) throw new Error('missing');
+      return {
+        ...current,
+        ...patch,
+        updatedAt: current.updatedAt + 1,
+      } as CustomProvider;
+    });
+    mockedDeleteCustomProvider.mockResolvedValue(undefined);
   });
 
   it('normalizeBaseUrl 去掉尾部斜杠并保留路径', () => {
@@ -48,25 +106,33 @@ describe('stores/customProviders', () => {
     ).toBeNull();
   });
 
-  it('createProvider 创建启用状态的 custom provider 并标准化字段', () => {
-    const provider = useCustomProvidersStore.getState().createProvider({
+  it('createProvider 创建启用状态的 custom provider 并标准化字段', async () => {
+    const provider = await useCustomProvidersStore.getState().createProvider({
       ...VALID_INPUT,
       name: ' 公司网关 ',
-      modelId: ' gpt-test ',
+      modelIds: [' gpt-test ', 'gpt-test'],
+      selectedModelId: ' gpt-test ',
     });
 
     expect(provider.id).toMatch(/^custom:/);
     expect(provider.name).toBe('公司网关');
     expect(provider.baseUrl).toBe('https://api.example.com/v1');
-    expect(provider.modelId).toBe('gpt-test');
+    expect(mockedCreateCustomProvider).toHaveBeenCalledWith({
+      ...VALID_INPUT,
+      name: '公司网关',
+      baseUrl: 'https://api.example.com/v1',
+      modelIds: ['gpt-test'],
+      selectedModelId: 'gpt-test',
+    });
+    expect(provider.selectedModelId).toBe('gpt-test');
     expect(provider.enabled).toBe(true);
     expect(useCustomProvidersStore.getState().providers).toHaveLength(1);
   });
 
-  it('updateProvider 可更新能力开关并保持 ModelInfo 映射正确', () => {
-    const provider = useCustomProvidersStore.getState().createProvider(VALID_INPUT);
+  it('updateProvider 可更新能力开关并保持 ModelInfo 映射正确', async () => {
+    const provider = await useCustomProvidersStore.getState().createProvider(VALID_INPUT);
 
-    useCustomProvidersStore.getState().updateProvider(provider.id, {
+    await useCustomProvidersStore.getState().updateProvider(provider.id, {
       name: '新名称',
       supportsTools: true,
       enabled: false,
@@ -77,16 +143,73 @@ describe('stores/customProviders', () => {
     expect(updated.supportsTools).toBe(true);
     expect(updated.enabled).toBe(false);
     expect(customProviderToModelInfo(updated)).toMatchObject({
-      id: updated.id,
+      id: expect.stringMatching(/^custom-model:/),
       provider: updated.id,
       label: '新名称',
       groupLabel: '自定义',
     });
   });
 
-  it('removeProvider 删除指定 provider', () => {
-    const provider = useCustomProvidersStore.getState().createProvider(VALID_INPUT);
-    useCustomProvidersStore.getState().removeProvider(provider.id);
+  it('updateProvider 可切换聊天模式', async () => {
+    const provider = await useCustomProvidersStore.getState().createProvider(VALID_INPUT);
+
+    await useCustomProvidersStore.getState().updateProvider(provider.id, {
+      streamMode: 'non-stream',
+    });
+
+    expect(useCustomProvidersStore.getState().providers[0]?.streamMode).toBe(
+      'non-stream',
+    );
+    expect(mockedUpdateCustomProvider).toHaveBeenCalledWith(provider.id, {
+      streamMode: 'non-stream',
+    });
+  });
+
+  it('createProvider 支持一个 provider 暴露多个模型', async () => {
+    const provider = await useCustomProvidersStore.getState().createProvider({
+      ...VALID_INPUT,
+      modelIds: ['gpt-test', 'gpt-test', 'gpt-other'],
+      selectedModelId: 'gpt-other',
+    });
+
+    expect(provider.modelIds).toEqual(['gpt-test', 'gpt-other']);
+    expect(provider.selectedModelId).toBe('gpt-other');
+  });
+
+  it('removeProvider 删除指定 provider', async () => {
+    const provider = await useCustomProvidersStore.getState().createProvider(VALID_INPUT);
+    await useCustomProvidersStore.getState().removeProvider(provider.id);
     expect(useCustomProvidersStore.getState().providers).toEqual([]);
+    expect(mockedDeleteCustomProvider).toHaveBeenCalledWith(provider.id);
+  });
+
+  it('hydrate 从 SQLite 加载并迁移旧 localStorage 配置', async () => {
+    mockedListCustomProviders.mockResolvedValueOnce([]);
+    localStorage.setItem(
+      'claw.custom-providers.v1',
+      JSON.stringify({
+        state: {
+          providers: [
+            {
+              ...makeProvider(VALID_INPUT, 'custom:legacy_provider'),
+              modelId: 'gpt-test',
+            },
+          ],
+        },
+        version: 2,
+      }),
+    );
+
+    await useCustomProvidersStore.getState().hydrate();
+
+    expect(mockedCreateCustomProvider).toHaveBeenCalledWith({
+      id: 'custom:legacy_provider',
+      ...VALID_INPUT,
+      baseUrl: 'https://api.example.com/v1',
+    });
+    expect(useCustomProvidersStore.getState().providers[0]?.id).toBe(
+      'custom:legacy_provider',
+    );
+    expect(localStorage.getItem('claw.custom-providers.v1')).toBeNull();
   });
 });

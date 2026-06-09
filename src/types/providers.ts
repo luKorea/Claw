@@ -9,6 +9,7 @@
 
 export type StaticProviderId = 'anthropic' | 'deepseek' | 'openai' | 'minimaxi';
 export type CustomProviderId = `custom:${string}`;
+export type CustomModelId = `custom-model:${string}:${string}`;
 export type ProviderId = StaticProviderId | CustomProviderId;
 
 export const ALL_PROVIDER_IDS: readonly StaticProviderId[] = [
@@ -24,6 +25,38 @@ export function isStaticProviderId(id: string): id is StaticProviderId {
 
 export function isCustomProviderId(id: string): id is CustomProviderId {
   return /^custom:[A-Za-z0-9_-]+$/.test(id);
+}
+
+export function isCustomModelId(id: string): id is CustomModelId {
+  return /^custom-model:[A-Za-z0-9_-]+:.+$/.test(id);
+}
+
+export function makeCustomModelId(
+  providerId: CustomProviderId,
+  rawModelId: string,
+): CustomModelId {
+  const suffix = providerId.slice('custom:'.length);
+  return `custom-model:${suffix}:${encodeURIComponent(rawModelId)}`;
+}
+
+export function parseCustomModelId(
+  id: string,
+): { providerId: CustomProviderId; rawModelId: string } | null {
+  if (!isCustomModelId(id)) return null;
+  const payload = id.slice('custom-model:'.length);
+  const separator = payload.indexOf(':');
+  if (separator <= 0) return null;
+  const suffix = payload.slice(0, separator);
+  const encoded = payload.slice(separator + 1);
+  if (!suffix || !encoded) return null;
+  try {
+    return {
+      providerId: `custom:${suffix}`,
+      rawModelId: decodeURIComponent(encoded),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export interface ProviderMeta {

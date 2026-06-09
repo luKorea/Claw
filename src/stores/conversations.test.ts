@@ -125,4 +125,30 @@ describe('stores/conversations', () => {
       expect(useChatStore.getState().conversationId).toBeNull();
     });
   });
+
+  describe('removeMany', () => {
+    it('批量删除包含当前会话时清 currentId + chat', () => {
+      useConversationsStore.setState({
+        list: [
+          makeConv({ id: 'a' }),
+          makeConv({ id: 'b' }),
+          makeConv({ id: 'c' }),
+        ],
+        currentId: 'b',
+      });
+      useChatStore.setState({
+        conversationId: 'b',
+        messages: [{ id: 'm1', role: 'user', content: [], createdAt: 0 }],
+        isStreaming: true,
+        error: 'xxx',
+      });
+
+      useConversationsStore.getState().removeMany(['a', 'b']);
+
+      expect(useConversationsStore.getState().list.map((c) => c.id)).toEqual(['c']);
+      expect(useConversationsStore.getState().currentId).toBeNull();
+      expect(useChatStore.getState().messages).toEqual([]);
+      expect(useChatStore.getState().isStreaming).toBe(false);
+    });
+  });
 });

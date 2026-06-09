@@ -44,12 +44,18 @@ export const MessageItem = memo(function MessageItem({ message }: Props) {
 
   const fullText = textBlocks.map((b) => b.text).join('');
   const fullThinking = thinkingBlocks.map((b) => b.thinking).join('');
+  const thinkingOnly =
+    !isUser &&
+    !message.streaming &&
+    Boolean(fullThinking) &&
+    !fullText &&
+    toolUseBlocks.length === 0;
 
   return (
     <div
       data-role={message.role}
       className={cn(
-        'group/message flex w-full gap-3 px-4 py-4 sm:px-6',
+        'group/message flex w-full items-start gap-3 px-4 py-4 sm:px-6',
         isUser ? 'flex-row-reverse bg-background' : 'bg-muted/30',
       )}
     >
@@ -64,10 +70,8 @@ export const MessageItem = memo(function MessageItem({ message }: Props) {
 
       <div
         className={cn(
-          'min-w-0 space-y-2',
-          isUser
-            ? 'max-w-[80%] rounded-2xl rounded-tr-sm border bg-muted/40 px-4 py-2.5'
-            : 'flex-1',
+          'min-w-0',
+          isUser ? 'flex max-w-[76%] flex-col items-end gap-1.5' : 'flex-1 space-y-2',
         )}
       >
         <div
@@ -90,31 +94,49 @@ export const MessageItem = memo(function MessageItem({ message }: Props) {
           )}
         </div>
 
-        {fullThinking && (
-          <ThinkingBlock text={fullThinking} streaming={message.streaming} />
-        )}
+        <div
+          className={cn(
+            'space-y-2',
+            isUser &&
+              'max-w-full rounded-2xl rounded-tr-sm border border-primary/15 bg-background px-4 py-3 text-left shadow-sm',
+          )}
+        >
+          {fullThinking && (
+            <ThinkingBlock
+              text={fullThinking}
+              streaming={message.streaming}
+              defaultOpen={thinkingOnly}
+            />
+          )}
 
-        {fullText ? (
-          <Markdown>{fullText}</Markdown>
-        ) : !message.streaming && !fullThinking && toolUseBlocks.length === 0 ? (
-          <div className="text-sm text-muted-foreground">(空消息)</div>
-        ) : null}
+          {thinkingOnly && (
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+              模型只返回思考过程，未返回正文。
+            </div>
+          )}
 
-        {toolUseBlocks.length > 0 && (
-          <div className="space-y-2">
-            {toolUseBlocks.map((b) => {
-              const result = toolResultBlocks.find((r) => r.tool_use_id === b.id);
-              return (
-                <ToolUseCard
-                  key={b.id}
-                  name={b.name}
-                  input={b.input}
-                  result={result}
-                />
-              );
-            })}
-          </div>
-        )}
+          {fullText ? (
+            <Markdown>{fullText}</Markdown>
+          ) : !message.streaming && !fullThinking && toolUseBlocks.length === 0 ? (
+            <div className="text-sm text-muted-foreground">(空消息)</div>
+          ) : null}
+
+          {toolUseBlocks.length > 0 && (
+            <div className="space-y-2">
+              {toolUseBlocks.map((b) => {
+                const result = toolResultBlocks.find((r) => r.tool_use_id === b.id);
+                return (
+                  <ToolUseCard
+                    key={b.id}
+                    name={b.name}
+                    input={b.input}
+                    result={result}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

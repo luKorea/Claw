@@ -12,12 +12,61 @@ use crate::error::{AppError, AppResult};
 /// 注意:macOS / Linux 上 `/var` 可能是 `/private/var` 的 symlink;为避免误判,
 /// 对每个 root 也做 canonicalize,再与 canonical path 比较前缀。
 pub(crate) fn safe_resolve_with(path: &str, allowed_roots: &[PathBuf]) -> AppResult<PathBuf> {
-    let p = Path::new(path);
-    let canonical = p
+    safe_resolve_with_context(
+        path,
+        allowed_roots,
+        dirs::home_dir().as_deref(),
+        current_username().as_deref(),
+    )
+}
+
+fn safe_resolve_with_context(
+    path: &str,
+    allowed_roots: &[PathBuf],
+    home_dir: Option<&Path>,
+    username: Option<&str>,
+) -> AppResult<PathBuf> {
+    let expanded = expand_path_alias_with(path, home_dir, username);
+    let canonical = expanded
         .canonicalize()
         .map_err(|e| AppError::InvalidInput(format!("路径无效: {e}")))?;
 
     ensure_allowed(canonical, allowed_roots)
+}
+
+fn expand_path_alias_with(path: &str, home_dir: Option<&Path>, username: Option<&str>) -> PathBuf {
+    let trimmed = path.trim();
+    let Some(home_dir) = home_dir else {
+        return PathBuf::from(trimmed);
+    };
+
+    if matches!(trimmed, "~" | "$HOME" | "/home") {
+        return home_dir.to_path_buf();
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        return home_dir.join(rest);
+    }
+    if let Some(rest) = trimmed.strip_prefix("$HOME/") {
+        return home_dir.join(rest);
+    }
+    if let Some(username) = username.filter(|value| !value.is_empty()) {
+        let home_prefix = format!("/home/{username}");
+        if trimmed == home_prefix {
+            return home_dir.to_path_buf();
+        }
+        if let Some(rest) = trimmed.strip_prefix(&format!("{home_prefix}/")) {
+            return home_dir.join(rest);
+        }
+    }
+
+    PathBuf::from(trimmed)
+}
+
+fn current_username() -> Option<String> {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .ok()
+        .filter(|value| !value.trim().is_empty())
 }
 
 fn ensure_allowed(canonical: PathBuf, allowed_roots: &[PathBuf]) -> AppResult<PathBuf> {
@@ -46,7 +95,12 @@ pub(crate) fn safe_resolve_for_write_with(
     path: &str,
     allowed_roots: &[PathBuf],
 ) -> AppResult<PathBuf> {
-    let p = Path::new(path);
+    let expanded = expand_path_alias_with(
+        path,
+        dirs::home_dir().as_deref(),
+        current_username().as_deref(),
+    );
+    let p = expanded.as_path();
     if !p.is_absolute() {
         return Err(AppError::InvalidInput("写入路径必须是绝对路径".into()));
     }
@@ -111,6 +165,12 @@ pub async fn read_text_file(path: String, max_bytes: Option<u64>) -> AppResult<R
     let max = max_bytes.unwrap_or(1024 * 1024); // 默认 1MB
 
     let metadata = tokio::fs::metadata(&p).await?;
+    if metadata.is_dir() {
+        return Err(AppError::InvalidInput(format!(
+            "路径是目录，请改用 list_dir 工具: {}",
+            p.display()
+        )));
+    }
     let size = metadata.len();
     if size > max {
         return Err(AppError::InvalidInput(format!(
@@ -338,6 +398,62 @@ mod tests {
         let dir = tempdir().unwrap();
         let r = safe_resolve_with(dir.path().to_str().unwrap(), &roots(&dir));
         assert!(r.is_ok());
+    }
+
+    #[test]
+    fn expand_path_alias_maps_home_shorthand() {
+        let dir = tempdir().unwrap();
+        assert_eq!(
+            expand_path_alias_with("~", Some(dir.path()), None),
+            dir.path()
+        );
+        assert_eq!(
+            expand_path_alias_with("~/a.txt", Some(dir.path()), None),
+            dir.path().join("a.txt")
+        );
+        assert_eq!(
+            expand_path_alias_with("$HOME/a.txt", Some(dir.path()), None),
+            dir.path().join("a.txt")
+        );
+    }
+
+    #[test]
+    fn expand_path_alias_maps_common_home_root_only_for_current_user() {
+        let dir = tempdir().unwrap();
+        assert_eq!(
+            expand_path_alias_with("/home", Some(dir.path()), Some("claw")),
+            dir.path()
+        );
+        assert_eq!(
+            expand_path_alias_with("/home/claw/a.txt", Some(dir.path()), Some("claw")),
+            dir.path().join("a.txt")
+        );
+        assert_eq!(
+            expand_path_alias_with("/home/other/a.txt", Some(dir.path()), Some("claw")),
+            PathBuf::from("/home/other/a.txt")
+        );
+    }
+
+    #[test]
+    fn safe_resolve_accepts_home_alias_inside_allowed_root() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("hello.txt");
+        fs::write(&file, "hi").unwrap();
+
+        let r = safe_resolve_with_context("~/hello.txt", &roots(&dir), Some(dir.path()), None);
+
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), file.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn safe_resolve_accepts_home_root_alias_inside_allowed_root() {
+        let dir = tempdir().unwrap();
+
+        let r = safe_resolve_with_context("/home", &roots(&dir), Some(dir.path()), Some("claw"));
+
+        assert!(r.is_ok());
+        assert_eq!(r.unwrap(), dir.path().canonicalize().unwrap());
     }
 
     #[test]

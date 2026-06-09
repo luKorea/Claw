@@ -120,6 +120,33 @@ describe('hooks/useModels', () => {
     expect(result.current.ids('openai')).toEqual(['gpt-5']);
   });
 
+  it('fetchProvider force 会绕过 24h 缓存重新拉取', async () => {
+    act(() => {
+      useModelsStore.setState((s) => ({
+        ...s,
+        byProvider: {
+          ...s.byProvider,
+          openai: {
+            ids: ['gpt-5'],
+            loading: false,
+            error: null,
+            fetchedAt: Date.now(),
+          },
+        },
+      }));
+    });
+    mockedGetApiKey.mockResolvedValueOnce('sk-test');
+    mockedListProviderModels.mockResolvedValueOnce(['gpt-new']);
+
+    const { result } = renderHook(() => useModels());
+    await act(async () => {
+      await result.current.fetchProvider('openai', { force: true });
+    });
+
+    expect(mockedListProviderModels).toHaveBeenCalledWith('openai', 'sk-test');
+    expect(result.current.ids('openai')).toEqual(['gpt-new']);
+  });
+
   it('isModelKnown:硬编码 ∪ 动态 ids', () => {
     act(() => {
       useModelsStore.getState().setIds('openai', ['gpt-5-from-api']);
@@ -206,5 +233,19 @@ describe('hooks/useModels', () => {
 
     expect(result.current.error('openai')).toBeNull();
     expect(result.current.ids('openai')).toEqual(['gpt-5']);
+  });
+
+  it('resetProvider 清空指定 provider 的动态模型缓存', () => {
+    act(() => {
+      useModelsStore.getState().setIds('deepseek', ['deepseek-chat']);
+    });
+
+    const { result } = renderHook(() => useModels());
+    act(() => {
+      result.current.resetProvider('deepseek');
+    });
+
+    expect(result.current.ids('deepseek')).toEqual([]);
+    expect(result.current.error('deepseek')).toBeNull();
   });
 });

@@ -13,6 +13,7 @@ export interface ConversationsState {
   upsert: (conv: Conversation) => void;
   patchLocal: (id: string, patch: Partial<Conversation>) => Conversation | null;
   remove: (id: string) => void;
+  removeMany: (ids: readonly string[]) => void;
   setLoading: (loading: boolean) => void;
 }
 
@@ -68,6 +69,18 @@ export const useConversationsStore = create<ConversationsState>((set, get) => ({
       currentId: wasCurrent ? null : s.currentId,
     }));
     // v1.3:删除当前会话时,同步清空 chat store(避免残留消息 + 当前会话指向 null 时显示错误)
+    if (wasCurrent) {
+      useChatStore.getState().clear();
+    }
+  },
+  removeMany: (ids) => {
+    const idSet = new Set(ids);
+    const currentId = get().currentId;
+    const wasCurrent = currentId !== null && idSet.has(currentId);
+    set((s) => ({
+      list: s.list.filter((c) => !idSet.has(c.id)),
+      currentId: wasCurrent ? null : s.currentId,
+    }));
     if (wasCurrent) {
       useChatStore.getState().clear();
     }

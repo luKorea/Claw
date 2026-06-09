@@ -16,10 +16,12 @@ const openAiProvider: CustomProvider = {
   name: 'Local OpenAI',
   protocol: 'openai-compatible',
   baseUrl: 'http://localhost:11434/v1',
-  modelId: 'llama3',
+  modelIds: ['llama3', 'qwen2'],
+  selectedModelId: 'llama3',
   enabled: true,
   supportsThinking: true,
   supportsTools: true,
+  streamMode: 'auto',
   createdAt: 0,
   updatedAt: 0,
 };
@@ -30,12 +32,13 @@ const anthropicProvider: CustomProvider = {
   name: 'Local Anthropic',
   protocol: 'anthropic-compatible',
   baseUrl: 'https://api.example.com/anthropic',
-  modelId: 'claude-compatible',
+  modelIds: ['claude-compatible'],
+  selectedModelId: 'claude-compatible',
 };
 
 function makeRequest(overrides: Partial<AdapterRequest> = {}): AdapterRequest {
   return {
-    model: 'custom:openai-local',
+    model: 'llama3',
     messages: [{ role: 'user', content: 'Reply exactly: OK' }],
     max_tokens: 8,
     tools: [
@@ -69,10 +72,13 @@ describe('providers/custom', () => {
   });
 
   it('buildCustomProviderRequestBody 构造 OpenAI 兼容 body', () => {
-    const body = buildCustomProviderRequestBody(openAiProvider, makeRequest());
+    const body = buildCustomProviderRequestBody(
+      openAiProvider,
+      makeRequest({ model: 'qwen2' }),
+    );
 
     expect(body).toMatchObject({
-      model: 'llama3',
+      model: 'qwen2',
       stream: true,
       max_tokens: 8,
       stream_options: { include_usage: true },
@@ -86,10 +92,25 @@ describe('providers/custom', () => {
     ]);
   });
 
+  it('buildCustomProviderRequestBody 按 non-stream 模式关闭流式字段', () => {
+    const body = buildCustomProviderRequestBody(
+      { ...openAiProvider, streamMode: 'non-stream' },
+      makeRequest({ model: 'qwen2' }),
+    );
+
+    expect(body).toMatchObject({
+      model: 'qwen2',
+      stream: false,
+      max_tokens: 8,
+    });
+    expect(body.stream_options).toBeUndefined();
+  });
+
   it('buildCustomProviderRequestBody 构造 Anthropic 兼容 body', () => {
     const body = buildCustomProviderRequestBody(
       anthropicProvider,
       makeRequest({
+        model: 'claude-compatible',
         system: 'system prompt',
         thinking: { budget_tokens: 4096 },
       }),
@@ -136,9 +157,15 @@ describe('providers/custom', () => {
       expect.objectContaining({
         input: expect.objectContaining({
           protocol: 'openai-compatible',
+          streamMode: 'auto',
+          fallbackProtocol: 'anthropic-compatible',
           baseUrl: 'http://localhost:11434/v1',
           apiKey: 'sk-test',
           body: expect.objectContaining({ model: 'llama3', stream: true }),
+          fallbackBody: expect.objectContaining({
+            model: 'llama3',
+            stream: true,
+          }),
         }),
       }),
     );
@@ -147,6 +174,49 @@ describe('providers/custom', () => {
       { type: 'text_delta', text: 'K' },
       { type: 'done', stopReason: 'stop' },
     ]);
+  });
+
+  it('auto 模式为 Anthropic 配置准备 OpenAI 协议 fallback body', async () => {
+    mockedInvoke.mockImplementationOnce(async (_command, args) => {
+      const payload = args as {
+        onEvent: {
+          onmessage?: (event: unknown) => void;
+        };
+      };
+      payload.onEvent.onmessage?.({
+        event: 'done',
+        data: { stopReason: 'stop' },
+      });
+    });
+
+    const adapter = new CustomProviderAdapter(anthropicProvider);
+    await collect(
+      adapter.stream(
+        makeRequest({ model: 'claude-compatible', system: 'system prompt' }),
+        'sk-test',
+        new AbortController().signal,
+      ),
+    );
+
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      'stream_custom_provider',
+      expect.objectContaining({
+        input: expect.objectContaining({
+          protocol: 'anthropic-compatible',
+          fallbackProtocol: 'openai-compatible',
+          body: expect.objectContaining({
+            model: 'claude-compatible',
+            system: 'system prompt',
+          }),
+          fallbackBody: expect.objectContaining({
+            model: 'claude-compatible',
+            messages: expect.arrayContaining([
+              expect.objectContaining({ role: 'system', content: 'system prompt' }),
+            ]),
+          }),
+        }),
+      }),
+    );
   });
 
   it('AbortSignal 触发 cancel_custom_provider_stream', async () => {

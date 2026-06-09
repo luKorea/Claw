@@ -5,6 +5,7 @@ import {
   ALL_MODELS,
   DEFAULT_MODEL_ID,
   getProviderOfModel,
+  isCustomModelId,
   isCustomProviderId,
   type ModelInfo,
 } from '@/types/providers';
@@ -36,6 +37,7 @@ interface Persisted {
 }
 
 function isModelKnown(id: string): boolean {
+  if (isCustomModelId(id)) return true;
   if (isCustomProviderId(id)) return true;
   if (ALL_MODELS.some((m) => m.id === id)) return true;
   return getProviderOfModel(id) !== null;

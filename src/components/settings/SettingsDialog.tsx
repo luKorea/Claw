@@ -42,7 +42,7 @@ export function SettingsDialog({
         <DialogHeader>
           <DialogTitle>设置</DialogTitle>
           <DialogDescription>
-            Claw 把你的 API Key 写入操作系统的 Keychain,不会上传任何服务端。
+            Claw 把你的 API Key 写入本机配置文件,不会上传任何服务端。
           </DialogDescription>
         </DialogHeader>
         <Tabs
