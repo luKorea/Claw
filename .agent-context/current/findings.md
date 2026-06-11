@@ -71,6 +71,10 @@
 - 侧边栏模型弹层使用 Radix `ScrollArea` + `max-h-72`。Viewport 依赖父级确定高度，当前组合会让 Root 截断内容但不形成可靠滚动区，因此模型多时只显示前半段；设置页的普通 Select 则能看到完整列表。
 - 本机 `claw.db` 当前自定义 Provider 仍保存为 `anthropic-compatible`、默认模型 `gemini-2.0-flash`。2026-06-09 再次使用已保存 Key 脱敏实测：Anthropic `/v1/messages` 为 401，OpenAI `/v1/chat/completions` + `qwen3-max` 为 200 / `OK`。
 - 模型发现端点无法可靠判断聊天协议：很多 OpenAI 网关的 `/v1/models` 同时接受多种鉴权头，所以“能获取模型”不代表保存的 Anthropic 聊天协议可用。`auto` 聊天模式需要承担协议级 fallback，而不仅是 stream/non-stream fallback。
+- 2026-06-11 发版 hook 方案已落地：`package.json.version` 是唯一版本主源，Tauri `version` 支持配置为 `../package.json`，实际打包版本由 Tauri 从 package 文件读取。
+- Git `pre-push` 无法把 hook 执行期间新建的版本提交自动加入当前原始 push；本地实验证明原始 push 仍会推送 hook 触发前解析到的旧 SHA。因此 hook 在用户选择发版后创建版本提交和 tag，再启动后台任务等待原始 push 结束后补推版本提交与 tag。
+- 发版 hook 只在交互式 `origin` push 中询问；`CLAW_RELEASE_SKIP=1`、非交互环境、非 origin remote 都直接跳过。
+- `scripts/sync-release-version.mjs` 专门同步 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/Cargo.lock`，且已修复“目标版本已相同时误判未找到版本字段”的幂等边界。
 
 ## Constraints
 
@@ -88,6 +92,7 @@
 - Large Vite chunk warning is known from prior build and only becomes actionable if bundle size affects startup or release packaging.
 - `/home` 只映射精确路径和当前用户名下路径，不映射任意 `/home/other`，避免把其他用户目录伪装成当前 home。
 - Sending duplicate auth aliases for custom OpenAI-compatible providers could be unusual for strict upstreams, but custom providers commonly point at gateway/proxy products; aliases only carry the same secret and are scoped to custom provider requests.
+- 发版 hook 的补推发生在后台任务里；如果原始 push 失败或远端分支没有到达 hook 创建版本提交前的 base SHA，后台任务会停止并把错误写入 `/tmp` 下的 `claw-release-hooks` 日志。
 
 ## Rejected Options
 

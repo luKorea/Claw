@@ -90,3 +90,11 @@ Implementation complete for the v0.1.2 P0/P1/P2 scope. README and prior closeout
 - [x] 自定义 Provider `auto` 模式在配置协议失败时，使用对应请求体自动回退另一兼容协议。
 - [x] “测试聊天”与正式聊天共享协议回退语义，并显示最终命中的协议。
 - [x] 补齐前端 / Rust 测试并运行完整验证。
+
+## Follow-up 2026-06-11 Git Hook Release Automation
+
+- [x] 将 `package.json.version` 固定为唯一版本主源，`src-tauri/tauri.conf.json.version` 改为读取 `../package.json`。
+- [x] 新增可提交的 `.githooks/pre-push`，普通 push 默认放行，交互式选择发版时创建版本提交和 Release tag。
+- [x] 新增 `scripts/install-git-hooks.sh` 和 `pnpm hooks:install`，通过 Git 原生 `core.hooksPath=.githooks` 启用团队共享 hook。
+- [x] 新增 `scripts/sync-release-version.mjs`，发版 tag 输入 `vX.Y.Z` 时同步 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`。
+- [x] 非交互 / `CLAW_RELEASE_SKIP=1` / 非 `origin` remote 自动跳过，CI 和紧急 push 不受影响。

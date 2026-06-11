@@ -22,7 +22,9 @@
     "test:real-providers": "cargo run --manifest-path src-tauri/Cargo.toml --example smoke_real_providers",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "hooks:install": "bash scripts/install-git-hooks.sh",
+    "postinstall": "bash scripts/install-git-hooks.sh || true"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",

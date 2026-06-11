@@ -63,6 +63,7 @@
 - Fixed the sidebar model picker viewport by replacing the clipped Radix ScrollArea usage with a reliable `max-h-72 overflow-y-auto` list.
 - Added custom Provider auto protocol fallback: the frontend sends an alternate protocol/body pair, and Rust retries that protocol when the configured protocol fails in `auto` mode.
 - Updated custom Provider “测试聊天” to attempt the alternate protocol in `auto` mode and return the resolved protocol for diagnostics.
+- Implemented Git hook release automation: `.githooks/pre-push`, hook installer, package scripts, Tauri package-version source, and release version sync helper.
 
 ## Changed Files
 
@@ -96,6 +97,11 @@
 - .agent-context/current/task_plan.md
 - .agent-context/current/findings.md
 - .agent-context/current/progress.md
+- .githooks/pre-push
+- scripts/install-git-hooks.sh
+- scripts/sync-release-version.mjs
+- package.json
+- src-tauri/tauri.conf.json
 - src/lib/tools/builtin.ts
 - src/lib/tools/builtin.test.ts
 - src/components/settings/CustomProvidersTab.tsx
@@ -211,6 +217,22 @@ Latest model picker / protocol fallback follow-up:
 - Reproduced current local custom Provider mismatch without printing the Key: SQLite config was `anthropic-compatible` + `gemini-2.0-flash`; Anthropic `/v1/messages` returned 401, OpenAI `/v1/chat/completions` + `qwen3-max` returned 200 / `OK`.
 - Targeted verification: `pnpm test:run src/components/sidebar/Sidebar.test.tsx src/lib/providers/custom.test.ts src/components/settings/CustomProvidersTab.test.tsx` passed, 19 tests.
 - Full verification: `pnpm typecheck` passed; `pnpm lint` passed; `pnpm test:run` passed, 35 files / 280 tests; `cargo test --lib` passed, 87 tests; `cargo fmt --check` passed; `pnpm build` passed with the known large chunk warning.
+
+Latest Git hook release automation follow-up:
+
+- `bash -n .githooks/pre-push`: passed.
+- `bash -n scripts/install-git-hooks.sh`: passed.
+- `node --check scripts/sync-release-version.mjs`: passed.
+- `node scripts/sync-release-version.mjs 0.1.1`: passed after fixing the same-version idempotency check; produced no extra version diff.
+- `pnpm hooks:install`: passed with sandbox escalation because it writes `.git/config`; `git config --get core.hooksPath` returns `.githooks`.
+- `CLAW_RELEASE_SKIP=1 .githooks/pre-push origin git@github.com:luKorea/Claw.git`: passed and skipped.
+- `.githooks/pre-push upstream git@github.com:someone/Claw.git`: passed and skipped.
+- `pnpm typecheck`: passed.
+- `pnpm lint`: passed.
+- `pnpm test:run`: passed, 35 files / 280 tests. Existing React `act(...)` warnings in `usePrompts.test.ts` remain.
+- `cargo test --lib` in `src-tauri`: passed, 87 tests.
+- `pnpm build`: passed with the known Vite large chunk warning.
+- `pnpm exec prettier --check package.json src-tauri/tauri.conf.json scripts/sync-release-version.mjs`: passed.
 
 ## Next Steps
 

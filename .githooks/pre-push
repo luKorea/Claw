@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+remote_name="${1:-}"
+remote_url="${2:-}"
+
+if [[ "${CLAW_RELEASE_SKIP:-}" == "1" ]]; then
+  exit 0
+fi
+
+if [[ "$remote_name" != "origin" ]]; then
+  exit 0
+fi
+
+if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+prompt() {
+  printf "%s" "$1" > /dev/tty
+}
+
+say() {
+  printf "%s\n" "$1" > /dev/tty
+}
+
+abort_release() {
+  say "Release tag 创建已中止：$1"
+  exit 1
+}
+
+branch="$(git symbolic-ref --quiet --short HEAD || true)"
+if [[ -z "$branch" ]]; then
+  exit 0
+fi
+
+prompt "是否创建 Release Tag? [y/N] "
+IFS= read -r answer < /dev/tty || exit 0
+
+case "$answer" in
+  y|Y|yes|YES|Yes) ;;
+  *) exit 0 ;;
+esac
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  abort_release "工作区不干净。请先提交或暂存处理，再重新 push 发版。"
+fi
+
+prompt "请输入 Release Tag，例如 v0.1.2: "
+IFS= read -r tag < /dev/tty || abort_release "未读取到 tag。"
+
+if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  abort_release "tag 必须符合 vX.Y.Z 格式。"
+fi
+
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+  abort_release "本地 tag 已存在：$tag"
+fi
+
+remote_tag_status=0
+git ls-remote --exit-code --tags "$remote_name" "refs/tags/$tag" >/dev/null 2>&1 || remote_tag_status=$?
+
+if [[ "$remote_tag_status" -eq 0 ]]; then
+  abort_release "远端 tag 已存在：$tag"
+fi
+
+if [[ "$remote_tag_status" -ne 2 ]]; then
+  abort_release "无法确认远端 tag 状态：$remote_name ($remote_url)"
+fi
+
+version="${tag#v}"
+base_sha="$(git rev-parse HEAD)"
+
+node scripts/sync-release-version.mjs "$version"
+
+if git diff --quiet -- package.json src-tauri/Cargo.toml src-tauri/Cargo.lock; then
+  say "版本文件已经是 $version，将直接创建 tag。"
+else
+  git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+  git commit -m "chore(release): bump version to $version" >/dev/null
+  say "已创建版本提交：chore(release): bump version to $version"
+fi
+
+git tag "$tag"
+release_sha="$(git rev-parse HEAD)"
+
+log_dir="${TMPDIR:-/tmp}/claw-release-hooks"
+mkdir -p "$log_dir"
+log_file="$log_dir/${tag}-$(date +%Y%m%d%H%M%S).log"
+parent_pid="$PPID"
+
+(
+  set -euo pipefail
+  cd "$repo_root"
+
+  while kill -0 "$parent_pid" 2>/dev/null; do
+    sleep 1
+  done
+
+  remote_branch_sha=""
+  for _ in $(seq 1 60); do
+    remote_branch_sha="$(git ls-remote "$remote_name" "refs/heads/$branch" | awk '{print $1}')"
+
+    if [[ "$remote_branch_sha" == "$base_sha" || "$remote_branch_sha" == "$release_sha" ]]; then
+      break
+    fi
+
+    sleep 1
+  done
+
+  if [[ "$remote_branch_sha" != "$base_sha" && "$remote_branch_sha" != "$release_sha" ]]; then
+    echo "Remote branch $branch did not reach expected sha $base_sha; skip release push."
+    exit 1
+  fi
+
+  CLAW_RELEASE_SKIP=1 git push "$remote_name" "$release_sha:refs/heads/$branch"
+  CLAW_RELEASE_SKIP=1 git push "$remote_name" "refs/tags/$tag:refs/tags/$tag"
+  echo "Release push complete: $tag ($release_sha)"
+) >> "$log_file" 2>&1 &
+
+release_job_pid=$!
+disown "$release_job_pid" 2>/dev/null || true
+
+say "已创建本地 tag：$tag"
+say "当前 push 完成后会后台推送版本提交和 tag。日志：$log_file"
