@@ -290,3 +290,8 @@ v1 **仅桌面端**（macOS / Windows / Linux）。不要添加 iOS / Android / 
 6. 新增依赖前先看 `node_modules` 是否已有等价物，**不引入重复能力的小型库**。
 7. 新增 Provider：在 `src/lib/providers/` 加 adapter 文件 + 在 `types.ts` / `ALL_PROVIDERS` 同步注册 + 改 CSP `connect-src` + 更新本文件表格。
 8. 新增功能 / UI 必须同步提交单元测试，见 "测试义务" 节；没有测试的代码不进入 main。
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->
