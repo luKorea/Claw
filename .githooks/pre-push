@@ -71,17 +71,20 @@ if [[ "$remote_tag_status" -ne 2 ]]; then
   abort_release "无法确认远端 tag 状态：$remote_name ($remote_url)"
 fi
 
-version="${tag#v}"
+release_version="${tag#v}"
+if [[ -z "${release_version:-}" || "$release_version" == "$tag" ]]; then
+  abort_release "无法从 tag 解析版本号：$tag"
+fi
 base_sha="$(git rev-parse HEAD)"
 
-node scripts/sync-release-version.mjs "$version"
+node scripts/sync-release-version.mjs "$release_version"
 
 if git diff --quiet -- package.json src-tauri/Cargo.toml src-tauri/Cargo.lock; then
-  say "版本文件已经是 $version，将直接创建 tag。"
+  say "版本文件已经是 ${release_version}，将直接创建 tag。"
 else
   git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock
-  git commit -m "chore(release): bump version to $version" >/dev/null
-  say "已创建版本提交：chore(release): bump version to $version"
+  git commit -m "chore(release): bump version to ${release_version}" >/dev/null
+  say "已创建版本提交：chore(release): bump version to ${release_version}"
 fi
 
 git tag "$tag"
