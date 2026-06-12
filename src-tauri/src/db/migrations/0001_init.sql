@@ -47,7 +47,10 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   transport TEXT NOT NULL,
   config TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_status TEXT,
+  tools TEXT
 );
 
 -- API Key 状态元数据

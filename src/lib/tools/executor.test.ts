@@ -2,7 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { invoke } from '@tauri-apps/api/core';
 
-import { executeBuiltinTool } from '@/lib/tools/executor';
+import {
+  executeTool,
+  executeBuiltinTool,
+  isMcpRuntimeToolName,
+  makeMcpRuntimeToolName,
+  mergeToolDefinitions,
+  mcpToolToDefinition,
+} from '@/lib/tools/executor';
 
 const mockedInvoke = vi.mocked(invoke);
 
@@ -105,6 +112,173 @@ describe('lib/tools/executor', () => {
       const parsed = JSON.parse(r.content);
       expect(parsed.entries).toHaveLength(2);
       expect(parsed.entries[1].is_dir).toBe(true);
+    });
+  });
+
+  describe('MCP 工具身份映射', () => {
+    it('生成稳定且 provider-safe 的 runtime name', () => {
+      expect(makeMcpRuntimeToolName('mcp_abc', 'read file')).toBe(
+        'mcp__mcp_abc__read_file',
+      );
+      expect(isMcpRuntimeToolName('mcp__mcp_abc__read_file')).toBe(true);
+      expect(isMcpRuntimeToolName('read_file')).toBe(false);
+    });
+
+    it('把 MCP tool 映射为 ToolDefinition 并保留归属信息', () => {
+      const definition = mcpToolToDefinition({
+        serverId: 'mcp_abc',
+        serverName: 'Filesystem',
+        originalName: 'read_file',
+        runtimeName: 'mcp__mcp_abc__read_file',
+        description: 'Read a file',
+        inputSchema: {
+          type: 'object',
+          properties: { path: { type: 'string' } },
+          required: ['path'],
+        },
+        enabled: true,
+        discoveredAt: 1,
+      });
+
+      expect(definition).toMatchObject({
+        name: 'mcp__mcp_abc__read_file',
+        description: '[MCP: Filesystem] Read a file',
+        source: 'mcp',
+        mcp_server_id: 'mcp_abc',
+        mcp_original_name: 'read_file',
+        mcp_server_name: 'Filesystem',
+      });
+      expect(definition.parameters.required).toEqual(['path']);
+    });
+
+    it('MCP schema 非 object 时降级为空对象参数', () => {
+      const definition = mcpToolToDefinition({
+        serverId: 'mcp_abc',
+        serverName: 'Filesystem',
+        originalName: 'ping',
+        runtimeName: 'mcp__mcp_abc__ping',
+        description: '',
+        inputSchema: { type: 'string' },
+        enabled: true,
+        discoveredAt: 1,
+      });
+
+      expect(definition.parameters).toEqual({
+        type: 'object',
+        properties: {},
+        required: [],
+      });
+    });
+
+    it('合并内置工具和启用的 MCP tools,并跳过重复 runtime name', () => {
+      const tools = mergeToolDefinitions(
+        [
+          {
+            name: 'read_file',
+            description: 'Read file',
+            source: 'builtin',
+            parameters: { type: 'object' },
+          },
+        ],
+        [
+          {
+            serverId: 'mcp_abc',
+            serverName: 'Filesystem',
+            originalName: 'read_file',
+            runtimeName: 'mcp__mcp_abc__read_file',
+            description: 'Read through MCP',
+            inputSchema: { type: 'object' },
+            enabled: true,
+            discoveredAt: 1,
+          },
+          {
+            serverId: 'mcp_abc',
+            serverName: 'Filesystem',
+            originalName: 'disabled',
+            runtimeName: 'mcp__mcp_abc__disabled',
+            description: 'Disabled tool',
+            inputSchema: { type: 'object' },
+            enabled: false,
+            discoveredAt: 1,
+          },
+          {
+            serverId: 'mcp_abc',
+            serverName: 'Filesystem',
+            originalName: 'duplicate',
+            runtimeName: 'read_file',
+            description: 'Collision',
+            inputSchema: { type: 'object' },
+            enabled: true,
+            discoveredAt: 1,
+          },
+        ],
+      );
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'read_file',
+        'mcp__mcp_abc__read_file',
+      ]);
+      expect(tools[1]).toMatchObject({
+        source: 'mcp',
+        mcp_server_id: 'mcp_abc',
+      });
+    });
+
+    it('executeTool 路由 MCP runtime name 到 call_mcp_tool', async () => {
+      mockedInvoke.mockResolvedValueOnce({
+        toolUseId: 'toolu_1',
+        content: 'pong',
+        isError: false,
+        summary: 'Returned text content',
+      });
+
+      const result = await executeTool(
+        'mcp__mcp_abc__ping',
+        { message: 'hi' },
+        { toolUseId: 'toolu_1' },
+      );
+
+      expect(result).toEqual({ ok: true, content: 'pong' });
+      expect(mockedInvoke).toHaveBeenCalledWith('call_mcp_tool', {
+        input: {
+          runtimeName: 'mcp__mcp_abc__ping',
+          arguments: { message: 'hi' },
+          toolUseId: 'toolu_1',
+        },
+      });
+    });
+
+    it('executeTool 将 MCP isError 结果转换为 ok=false', async () => {
+      mockedInvoke.mockResolvedValueOnce({
+        toolUseId: 'toolu_1',
+        content: 'MCP tool failed: server disabled',
+        isError: true,
+        summary: 'Server disabled',
+        errorCategory: 'server_disabled',
+      });
+
+      const result = await executeTool(
+        'mcp__mcp_abc__ping',
+        { message: 'hi' },
+        { toolUseId: 'toolu_1' },
+      );
+
+      expect(result).toEqual({
+        ok: false,
+        content: 'MCP tool failed: server disabled',
+      });
+    });
+
+    it('executeTool 保留内置工具执行路径', async () => {
+      mockedInvoke.mockResolvedValueOnce({ path: '/a', content: 'hi', size: 2 });
+
+      const result = await executeTool('read_file', { path: '/a' });
+
+      expect(result.ok).toBe(true);
+      expect(mockedInvoke).toHaveBeenCalledWith('read_text_file', {
+        path: '/a',
+        maxBytes: undefined,
+      });
     });
   });
 });

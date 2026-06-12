@@ -14,6 +14,7 @@
 - 🔐 **API Key 本机配置**：写入本机 `app_data_dir/claw.db`，不进入前端 localStorage 或日志
 - 📋 **系统提示词**：内置 4 个预设，支持自定义与变量占位
 - 🛠️ **多轮工具调用**：内置 `read_file` / `list_dir` / `write_file`，可启用 / 禁用，工具结果会回传模型继续推理
+- 🔌 **MCP 本地工具**：支持配置本地命令启动的 MCP Server，连接测试、工具发现、启停、刷新、删除和聊天调用
 - ⌨️ **快捷键**：`⌘+N` 新建、`⌘+,` 设置、`Esc` 停止
 
 ## 🛠️ 技术栈
@@ -125,6 +126,15 @@ pnpm test:real-providers
 
 所有文件操作都限制在白名单目录内，危险操作会标记。
 
+### MCP 本地 Server
+
+- 设置 -> 工具中可新增本地命令启动的 MCP Server，例如 `npx -y <server-package> ...`。
+- 连接测试会执行最小 MCP 初始化、`tools/list` 工具发现，并把工具列表保存到 SQLite。
+- 启用且测试成功的 MCP 工具会和内置工具一起暴露给支持 tool calling 的模型。
+- 聊天调用 MCP 工具时由 Rust 后端执行 `tools/call`，结果会作为 `tool_result` 回传模型。
+- 当前 MVP 仅支持本地 command-launched MCP Server；远程 HTTP/SSE transport、resources、prompts、sampling 暂不支持。
+- 诊断信息会脱敏环境变量和 secret-like 内容；禁用、删除、超时、调用失败会返回可控错误结果。
+
 ## 📦 打包
 
 ```bash
@@ -165,9 +175,10 @@ https://github.com/luKorea/Claw/releases
 - [x] 多 Provider / 自定义 Provider
 - [x] MiniMax Rust 流式桥接
 - [x] 多轮工具调用
+- [x] MCP 本地 command Server 集成 MVP
 - [x] GitHub Releases 多平台发布
 - [x] 真实 Provider 联网冒烟验证（DeepSeek 已通过；其他 Provider 按需验证）
-- [ ] MCP 集成（stdio / sse / http transport）
+- [ ] MCP 远程 transport（HTTP / SSE）与非工具能力
 - [ ] 项目级 context（`.claude` 文件夹）
 - [ ] 富媒体工具结果可视化（图片、表格）
 - [ ] 云同步

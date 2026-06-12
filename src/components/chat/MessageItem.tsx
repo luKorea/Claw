@@ -152,6 +152,7 @@ function ToolUseCard({
   result?: Extract<ChatMessage['content'][number], { type: 'tool_result' }>;
 }) {
   const [open, setOpen] = useState(false);
+  const toolIdentity = useMemo(() => describeToolIdentity(name), [name]);
 
   return (
     <div
@@ -170,7 +171,12 @@ function ToolUseCard({
           <ChevronRightIcon className="size-3" />
         )}
         <span className="text-muted-foreground">🔧</span>
-        <span className="font-medium">{name}</span>
+        <span className="font-medium">{toolIdentity.displayName}</span>
+        {toolIdentity.ownerLabel && (
+          <Badge variant="outline" className="px-1 py-0 text-[10px] font-normal">
+            {toolIdentity.ownerLabel}
+          </Badge>
+        )}
         {result && !result.is_error && (
           <CheckCircle2Icon className="ml-auto size-3.5 text-green-600" />
         )}
@@ -204,6 +210,20 @@ function ToolUseCard({
       )}
     </div>
   );
+}
+
+function describeToolIdentity(name: string): {
+  displayName: string;
+  ownerLabel: string | null;
+} {
+  const match = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (!match) {
+    return { displayName: name, ownerLabel: null };
+  }
+  return {
+    displayName: match[2] || name,
+    ownerLabel: `MCP: ${match[1]}`,
+  };
 }
 
 function truncateForDisplay(s: string, max: number): string {

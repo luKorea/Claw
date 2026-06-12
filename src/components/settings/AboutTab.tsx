@@ -2,9 +2,30 @@
  * AboutTab (v1.3 重构,从 SettingsDialog 拆出)
  */
 
+import { useEffect, useState } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
+
 const BRAND_ICON_SRC = '/brand/final/claw-ui-mark.svg';
 
 export function AboutTab() {
+  const [version, setVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    void getVersion()
+      .then((appVersion) => {
+        if (mounted) setVersion(appVersion);
+      })
+      .catch(() => {
+        if (mounted) setVersion(null);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   return (
     <div className="space-y-3 pt-2 text-sm">
       <div className="flex items-center gap-3">
@@ -18,7 +39,7 @@ export function AboutTab() {
         </div>
         <div>
           <p>
-            <strong>Claw</strong> v0.2.0
+            <strong>Claw</strong> {version ? `v${version}` : 'v...'}
           </p>
           <p className="text-xs text-muted-foreground">多 Provider AI 桌面客户端</p>
         </div>

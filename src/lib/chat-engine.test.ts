@@ -23,7 +23,7 @@ vi.mock('@/lib/providers', async () => {
 });
 
 vi.mock('@/lib/tools/executor', () => ({
-  executeBuiltinTool: vi.fn(),
+  executeTool: vi.fn(),
 }));
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,7 +36,7 @@ import type { ChatMessage, ContentBlock } from '@/types/claude';
 import type { ProviderId } from '@/types/providers';
 
 const mockedSelectAdapter = vi.mocked(providers.selectAdapter);
-const mockedExecute = vi.mocked(executor.executeBuiltinTool);
+const mockedExecute = vi.mocked(executor.executeTool);
 
 function makeAdapter(events: AdapterEvent[]): ProviderAdapter {
   return {
@@ -196,7 +196,7 @@ describe('lib/chat-engine', () => {
     ]);
 
     expect(mockedExecute).toHaveBeenCalledTimes(1);
-    expect(mockedExecute).toHaveBeenCalledWith('read_file', { path: '/tmp/a' });
+    expect(mockedExecute).toHaveBeenCalledWith('read_file', { path: '/tmp/a' }, { toolUseId: 't1' });
 
     const final = events.at(-1) as { type: 'final_done'; totalTurns: number };
     expect(final.totalTurns).toBe(2);
@@ -374,6 +374,45 @@ describe('lib/chat-engine', () => {
     expect(tr).toBeDefined();
     expect(tr!.isError).toBe(true);
     expect(tr!.content).toBe('exec fail');
+  });
+
+  it('MCP tool_use 通过统一 executor 往返 tool_result', async () => {
+    const runtimeName = 'mcp__mcp_abc__lookup';
+    const round1: AdapterEvent[] = [
+      { type: 'tool_use_start', id: 'toolu_mcp', name: runtimeName },
+      { type: 'tool_use_end', id: 'toolu_mcp', input: { query: 'claw' } },
+      { type: 'done', stopReason: 'tool_use' },
+    ];
+    const round2: AdapterEvent[] = [
+      { type: 'text_delta', text: 'MCP 返回了结果' },
+      { type: 'done', stopReason: 'end_turn' },
+    ];
+    let callIdx = 0;
+    const adapter: ProviderAdapter = {
+      id: 'anthropic',
+      baseUrl: '',
+      capabilities: { thinking: true, tools: true, system: true },
+      validateKey: () => ({ ok: true }),
+      previewKey: () => '',
+      async *stream() {
+        const events = callIdx++ === 0 ? round1 : round2;
+        for (const e of events) yield e;
+      },
+    } as unknown as ProviderAdapter;
+    mockedSelectAdapter.mockReturnValue(adapter);
+    mockedExecute.mockResolvedValue({ ok: true, content: 'mcp result' });
+
+    const events = await collect(runChatTurn(makeCtx(adapter)));
+
+    expect(mockedExecute).toHaveBeenCalledWith(
+      runtimeName,
+      { query: 'claw' },
+      { toolUseId: 'toolu_mcp' },
+    );
+    const result = events.find((event) => (event as { type: string }).type === 'tool_result') as
+      | { type: 'tool_result'; content: string; isError: boolean }
+      | undefined;
+    expect(result).toMatchObject({ content: 'mcp result', isError: false });
   });
 
   it('serializeAssistantContent:文本 + 思考 + tool_use', () => {

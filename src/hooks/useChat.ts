@@ -21,6 +21,8 @@ import { useToolsStore } from '@/stores/tools';
 import { now, uuid } from '@/lib/utils';
 import { getApiKey, listConfiguredProviders } from '@/lib/keyring';
 import { filterEnabled } from '@/lib/tools/builtin';
+import { mergeToolDefinitions } from '@/lib/tools/executor';
+import { listMcpTools } from '@/lib/mcp';
 import { conversationApi, messageApi } from '@/lib/db';
 import {
   getModelInfo,
@@ -28,6 +30,7 @@ import {
   resolveConfiguredModel,
 } from '@/types/providers';
 import type { ChatMessage, ContentBlock, Usage } from '@/types/claude';
+import type { ToolDefinition } from '@/types/tool';
 import {
   runChatTurn,
   resolveMaxTokens,
@@ -51,6 +54,15 @@ interface ToolResult {
 
 let activeAbortController: AbortController | null = null;
 let activeSending = false;
+
+/** 计算本轮聊天可暴露给模型的工具列表。 */
+export async function resolveChatTools(
+  disabledBuiltins: readonly string[],
+): Promise<ToolDefinition[]> {
+  const builtinTools = filterEnabled(disabledBuiltins);
+  const mcpTools = await listMcpTools();
+  return mergeToolDefinitions(builtinTools, mcpTools);
+}
 
 /** 中断当前正在进行的聊天流。可从输入区、侧边栏等任意 UI 入口调用。 */
 export function cancelActiveChatStream(): void {
@@ -194,7 +206,7 @@ export function useChat() {
     const thinking =
       thinkingEnabled && supportsThinking ? { budget_tokens: thinkingBudget } : null;
 
-    const enabledTools = filterEnabled(useToolsStore.getState().disabled);
+    const enabledTools = await resolveChatTools(useToolsStore.getState().disabled);
     const controller = new AbortController();
     activeAbortController = controller;
 

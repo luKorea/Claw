@@ -20,7 +20,7 @@
   --accent: #eaf3ff;
   --accent-foreground: #044AE9;
   --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
+  --destructive-foreground: #ffffff;
   --border: #d7e5f8;
   --input: #d7e5f8;
   --ring: #044AE9;

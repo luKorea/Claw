@@ -27,7 +27,7 @@ import {
   selectAdapter,
   type AdapterRequest,
 } from '@/lib/providers';
-import { executeBuiltinTool } from '@/lib/tools/executor';
+import { executeTool } from '@/lib/tools/executor';
 
 /** 引擎对外的事件流。一个 turn 可能 yield 几十个 delta 事件,直到 final_done。 */
 export type EngineEvent =
@@ -233,7 +233,7 @@ export async function* runChatTurn(
     for (const tu of toolUses) {
       yield { type: 'tool_executing', toolUseId: tu.id, name: tu.name };
       try {
-        const r = await executeBuiltinTool(tu.name, tu.input);
+        const r = await executeTool(tu.name, tu.input, { toolUseId: tu.id });
         yield {
           type: 'tool_result',
           toolUseId: tu.id,

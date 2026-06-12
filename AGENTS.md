@@ -77,7 +77,7 @@ claw-client/
 │   │   ├── prompts/              # 提示词管理
 │   │   └── ErrorBoundary.tsx
 │   ├── hooks/                    # useChat / useSettings / useConversations / usePrompts
-│   ├── lib/                      # 业务封装（anthropic / streaming / keyring / db / tools / prompts）
+│   ├── lib/                      # 业务封装（anthropic / streaming / keyring / db / tools / mcp / prompts）
 │   ├── stores/                   # Zustand stores
 │   ├── styles/globals.css        # Tailwind 4 入口 + shadcn 主题变量
 │   ├── types/                    # Claude / Conversation / Tool 类型
@@ -86,7 +86,7 @@ claw-client/
 │   └── vite-env.d.ts
 ├── src-tauri/                    # Rust 后端
 │   ├── src/
-│   │   ├── commands/             # Tauri commands（keyring / db / prompt / tool）
+│   │   ├── commands/             # Tauri commands（keyring / db / prompt / tool / mcp）
 │   │   ├── db/                   # SQLite 池 + 迁移
 │   │   ├── error.rs
 │   │   ├── lib.rs
@@ -129,6 +129,9 @@ claw-client/
 | `custom_provider` | `list_custom_provider_models(input)` | 获取自定义 Provider 可用模型列表 |
 | `custom_provider` | `stream_custom_provider(input)` / `cancel_custom_provider_stream(requestId)` | 自定义 Provider 聊天桥接；支持 `auto` / `stream` / `non-stream` 模式 |
 | `custom_provider` | `test_custom_provider_chat(input)` | 使用当前配置发起短消息测试，返回脱敏 endpoint / 预览诊断 |
+| `mcp` | `list_mcp_servers` / `create_mcp_server` / `update_mcp_server` / `delete_mcp_server` | 本地 command MCP Server SQLite CRUD；不回显 env 明文 |
+| `mcp` | `test_mcp_server(id)` / `refresh_mcp_server_tools(id)` / `set_mcp_server_enabled(id, enabled)` | MCP 初始化、工具发现、启停和刷新；失败诊断必须脱敏 |
+| `mcp` | `list_mcp_tools(serverId?)` / `call_mcp_tool(input)` | 聊天可用 MCP 工具列表和 `tools/call` 调用；返回受控 tool result |
 | `tool` | `read_text_file` / `list_dir` / `write_text_file` / `pick_directory` | 文件工具（白名单目录） |
 
 新增 command 必须同步：
@@ -267,6 +270,7 @@ v1 **仅桌面端**（macOS / Windows / Linux）。不要添加 iOS / Android / 
 | API Key 配置 | `src-tauri/src/commands/settings.rs` | API Key 唯一入口，SQLite 主源；旧 Keychain 只做显式导入 |
 | 数据库 | `src-tauri/src/db/` | 迁移、连接池 |
 | 工具执行 | `src-tauri/src/commands/tool.rs` | 路径白名单 |
+| MCP Runtime | `src-tauri/src/commands/mcp.rs` / `src/lib/mcp.ts` / `src/lib/tools/executor.ts` | 本地 command MCP Server 管理、工具发现与聊天调用 |
 | 流式核心 | `src/hooks/useChat.ts` | 多轮 tool_use 循环 + 选 adapter |
 | Provider 抽象 | `src/lib/providers/` | `ProviderAdapter` 接口 + Anthropic / OAI 兼容 driver |
 | 流式归一化 | `src/lib/streaming.ts` | 消费 `AdapterEvent`,组装 ContentBlock[] |
@@ -289,9 +293,11 @@ v1 **仅桌面端**（macOS / Windows / Linux）。不要添加 iOS / Android / 
 5. 不要在 `useChat` / `useSettings` 里直接读 `localStorage` 同步状态，统一走 store。
 6. 新增依赖前先看 `node_modules` 是否已有等价物，**不引入重复能力的小型库**。
 7. 新增 Provider：在 `src/lib/providers/` 加 adapter 文件 + 在 `types.ts` / `ALL_PROVIDERS` 同步注册 + 改 CSP `connect-src` + 更新本文件表格。
-8. 新增功能 / UI 必须同步提交单元测试，见 "测试义务" 节；没有测试的代码不进入 main。
+8. MCP MVP 仅支持本地 command-launched Server；不要把远程 HTTP/SSE、resources、prompts、sampling 混入当前实现。
+9. 新增功能 / UI 必须同步提交单元测试，见 "测试义务" 节；没有测试的代码不进入 main。
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
+at specs/001-mcp-integration/plan.md
 <!-- SPECKIT END -->

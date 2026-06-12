@@ -23,6 +23,10 @@ export interface ToolDefinition {
   source: 'builtin' | 'mcp';
   /** MCP server id(仅 source === 'mcp' 时存在) */
   mcp_server_id?: string;
+  /** MCP 原始工具名,UI 展示和后端路由时使用 */
+  mcp_original_name?: string;
+  /** MCP server 显示名,用于让用户识别工具归属 */
+  mcp_server_name?: string;
 }
 
 export interface ToolCall {

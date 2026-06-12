@@ -4,7 +4,15 @@
  */
 
 import { ToolsSection } from '@/components/settings/ToolsSection';
+import { McpServersTab } from '@/components/settings/McpServersTab';
+import { Separator } from '@/components/ui/separator';
 
 export function ToolsTab() {
-  return <ToolsSection />;
+  return (
+    <div className="space-y-5">
+      <ToolsSection />
+      <Separator />
+      <McpServersTab />
+    </div>
+  );
 }

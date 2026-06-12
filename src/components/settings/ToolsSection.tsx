@@ -1,6 +1,7 @@
 import { useToolsStore } from '@/stores/tools';
 import { useToolEnabled } from '@/hooks/useToolEnabled';
 import { BUILTIN_TOOLS } from '@/lib/tools/builtin';
+import { cn } from '@/lib/utils';
 
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -11,19 +12,27 @@ function ToolRow({ name, description }: { name: string; description: string }) {
   // v1.3:细粒度 selector,只在该 tool 启用状态变化时重渲
   const isEnabled = useToolEnabled(name);
   const setDisabled = useToolsStore((s) => s.setDisabled);
+  const isDangerous = name === 'write_file';
 
   return (
-    <Card className="flex items-start gap-3 p-3">
+    <Card
+      className={cn(
+        'flex items-start gap-3 p-3',
+        isDangerous && 'border-destructive/30 bg-destructive/5',
+      )}
+    >
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-2">
           <span className="font-mono text-sm">{name}</span>
-          {name === 'write_file' && (
+          {isDangerous && (
             <Badge variant="destructive" className="text-[10px]">
               危险
             </Badge>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">{description}</p>
+        <p className={cn('text-xs text-muted-foreground', isDangerous && 'text-destructive')}>
+          {description}
+        </p>
       </div>
       <div className="flex items-center gap-2 pt-1">
         <Label className="text-xs text-muted-foreground">

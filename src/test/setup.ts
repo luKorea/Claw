@@ -12,3 +12,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   },
   invoke: vi.fn(),
 }));
+
+vi.mock('@tauri-apps/api/app', () => ({
+  getVersion: vi.fn(),
+}));
