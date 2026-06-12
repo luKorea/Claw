@@ -42,6 +42,8 @@
     "dialog:allow-message",
     "shell:default",
     "shell:allow-open",
+    "updater:default",
+    "process:default",
     "log:default"
   ]
 }

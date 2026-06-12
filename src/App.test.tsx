@@ -23,6 +23,10 @@ vi.mock('@/components/settings/SettingsDialog', () => ({
   ),
 }));
 
+vi.mock('@/components/updater/UpdatePrompt', () => ({
+  UpdatePrompt: () => <div data-testid="update-prompt" />,
+}));
+
 vi.mock('@/hooks/useSettings', () => ({
   useSettings: vi.fn(),
 }));

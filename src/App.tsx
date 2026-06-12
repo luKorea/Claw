@@ -4,6 +4,7 @@ import { useHotkeys } from 'react-hotkeys-hook';
 import { Sidebar } from '@/components/sidebar/Sidebar';
 import { ChatLayout } from '@/components/chat/ChatLayout';
 import { SettingsDialog, type SettingsTab } from '@/components/settings/SettingsDialog';
+import { UpdatePrompt } from '@/components/updater/UpdatePrompt';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSettings } from '@/hooks/useSettings';
@@ -18,10 +19,12 @@ import {
   ALL_PROVIDER_IDS,
   resolveConfiguredModel,
 } from '@/types/providers';
+import type { AvailableUpdate } from '@/lib/updater';
 
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('apikey');
+  const [promptedUpdate, setPromptedUpdate] = useState<AvailableUpdate | null>(null);
   const autoOpenedSettingsRef = useRef(false);
   const { settings, keys, configuredProviders } = useSettings();
   const conv = useConversations();
@@ -129,6 +132,11 @@ export default function App() {
             onOpenChange={setSettingsOpen}
             activeTab={settingsTab}
             onActiveTabChange={setSettingsTab}
+            onUpdateAvailable={setPromptedUpdate}
+          />
+          <UpdatePrompt
+            externalUpdate={promptedUpdate}
+            onExternalUpdateConsumed={() => setPromptedUpdate(null)}
           />
         </div>
       </TooltipProvider>

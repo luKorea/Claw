@@ -29,6 +29,7 @@ import { CustomProvidersTab } from '@/components/settings/CustomProvidersTab';
 import { AboutTab } from '@/components/settings/AboutTab';
 import { PromptsTab } from '@/components/settings/PromptsTab';
 import { ToolsTab } from '@/components/settings/ToolsTab';
+import type { AvailableUpdate } from '@/lib/updater';
 
 export type SettingsTab = 'apikey' | 'models' | 'prompts' | 'tools' | 'about';
 
@@ -70,7 +71,13 @@ const SETTINGS_NAV_ITEMS: Array<{
   },
 ];
 
-function SettingsContent({ activeTab }: { activeTab: SettingsTab }) {
+function SettingsContent({
+  activeTab,
+  onUpdateAvailable,
+}: {
+  activeTab: SettingsTab;
+  onUpdateAvailable?: (update: AvailableUpdate) => void;
+}) {
   if (activeTab === 'apikey') return <ApiKeyTab />;
   if (activeTab === 'models') {
     return (
@@ -83,7 +90,7 @@ function SettingsContent({ activeTab }: { activeTab: SettingsTab }) {
   }
   if (activeTab === 'prompts') return <PromptsTab />;
   if (activeTab === 'tools') return <ToolsTab />;
-  return <AboutTab />;
+  return <AboutTab onUpdateAvailable={onUpdateAvailable} />;
 }
 
 interface Props {
@@ -91,6 +98,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   activeTab: SettingsTab;
   onActiveTabChange: (tab: SettingsTab) => void;
+  onUpdateAvailable?: (update: AvailableUpdate) => void;
 }
 
 export function SettingsDialog({
@@ -98,6 +106,7 @@ export function SettingsDialog({
   onOpenChange,
   activeTab,
   onActiveTabChange,
+  onUpdateAvailable,
 }: Props) {
   const activeItem =
     SETTINGS_NAV_ITEMS.find((item) => item.value === activeTab) ?? SETTINGS_NAV_ITEMS[0];
@@ -160,7 +169,10 @@ export function SettingsDialog({
                 {activeItem.description}
               </p>
             </div>
-            <SettingsContent activeTab={activeTab} />
+            <SettingsContent
+              activeTab={activeTab}
+              onUpdateAvailable={onUpdateAvailable}
+            />
           </main>
         </div>
       </DialogContent>

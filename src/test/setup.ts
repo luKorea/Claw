@@ -16,3 +16,11 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@tauri-apps/api/app', () => ({
   getVersion: vi.fn(),
 }));
+
+vi.mock('@tauri-apps/plugin-updater', () => ({
+  check: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/plugin-process', () => ({
+  relaunch: vi.fn(),
+}));
