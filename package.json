@@ -1,7 +1,7 @@
 {
   "name": "claw-client",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "description": "多 Provider AI 桌面客户端 (Tauri 2 + React 19)",
   "scripts": {
